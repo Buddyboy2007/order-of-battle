@@ -364,6 +364,8 @@ body.theatre{overflow:hidden}
 #fronts .axis.sea{stroke:#8FE3F5;stroke-dasharray:2 4}
 #fronts .line{fill:none;stroke:#FFE07A;stroke-width:2.2;vector-effect:non-scaling-stroke;pointer-events:none}
 #fronts .progress{fill:#FFE07A;stroke:#031018;stroke-width:1.2;vector-effect:non-scaling-stroke;pointer-events:none}
+#fronts .battle{fill:#FFF1B5;stroke:#031018;stroke-width:2.5;paint-order:stroke fill;
+  font:600 7px "IBM Plex Mono",monospace;letter-spacing:.04em;pointer-events:none}
 
 #blasts circle{fill:none;stroke:var(--d-red);stroke-width:1.6;vector-effect:non-scaling-stroke}
 #blasts circle.fo{stroke:#FFD36A}
@@ -504,6 +506,8 @@ body.theatre{overflow:hidden}
           <li><b>Doctrine.</b> Each side fights the way its own numbers say it fights. The United States comes out air-led with everything behind it; Chile comes out naval-led; Switzerland is ground and nothing else. None of it is hand-written — it is read off the pillar scores and the hardware each country keeps per soldier.</li>
           <li><b>The line.</b> Every month the front shifts a little toward whoever is winning the exchange, and both sides lose materiel doing it. A province changes hands when the line finally breaks.</li>
           <li><b>Orders.</b> Every unit is assigned to defend, invade or patrol. Defenders hold their post, invaders push toward an active front, and patrols roam until they detect a nearby enemy and hunt it.</li>
+          <li><b>Air and sea.</b> Aircraft have unlimited strategic travel, but opposing wings only dogfight inside a five-mile intercept radius. Fleets remain offshore, patrol open water and hunt other fleets rather than crossing land borders.</li>
+          <li><b>Battle.</b> Combat width limits how many formations can fight at once. Organization breaks before strength; planning helps attacks, entrenchment helps defenders, and air or naval superiority changes the advance.</li>
           <li><b>Duration.</b> Wars do not expire into ceasefires or draws. A front keeps grinding until a country falls, and the simulation stops only when one country remains.</li>
           <li><b>Last resort.</b> A nuclear state facing annihilation may not go quietly.</li>
         </ol>
@@ -1431,7 +1435,10 @@ function renderFronts(){
       out+='<path class="claim" d="'+GD[e.to].d+'" fill="'+strokeOf(X)+'" opacity="'+(.035+.19*pressure).toFixed(3)+'"></path>';
     out+='<path class="axis '+(c.th==='sea'?'sea':'')+'" d="M'+a[0].toFixed(1)+' '+a[1].toFixed(1)+'L'+b[0].toFixed(1)+' '+b[1].toFixed(1)+'"></path>'+
          '<path class="line" d="M'+a[0].toFixed(1)+' '+a[1].toFixed(1)+'L'+px.toFixed(1)+' '+py.toFixed(1)+'"></path>'+
-         '<circle class="progress" cx="'+px.toFixed(1)+'" cy="'+py.toFixed(1)+'" r="2.8"></circle>';
+         '<circle class="progress" cx="'+px.toFixed(1)+'" cy="'+py.toFixed(1)+'" r="2.8"></circle>'+
+         '<text class="battle" x="'+((a[0]+b[0])/2).toFixed(1)+'" y="'+(((a[1]+b[1])/2)-5).toFixed(1)+'" text-anchor="middle">'+
+         (w.phase||'MOBILIZING')+' · WIDTH '+(w.widthA||0)+'/'+(w.width||8)+'–'+(w.widthB||0)+'/'+(w.width||8)+
+         ' · AIR '+(w.airPairs||0)+'× 5MI</text>';
   });
   gFront.innerHTML=out;
 }
@@ -1781,7 +1788,8 @@ function orderFor(n, k, id){
 
 function mkUnit(n, k, t, x, y){
   const id = UID++, ord = orderFor(n,k,id);
-  const u = {id, k, own:n.code, t, x, y, destX:x, destY:y, pendingT:null, str:1, ord, tgt:null, hunt:null,
+  const u = {id, k, own:n.code, t, x, y, destX:x, destY:y, pendingT:null,
+             str:1, org:1, plan:.15+Math.random()*.25, entrench:0, ord, tgt:null, hunt:null,
              el:null, glyph:null, heading:0, mark:0, home:t};
   const g = document.createElementNS('http://www.w3.org/2000/svg','g');
   g.setAttribute('class','u '+k);
@@ -1885,7 +1893,7 @@ function updateUnitTitle(u,n){
   const title = u.el && u.el.querySelector('title'); if(!title) return;
   const prey = u.hunt && UNITS.get(u.hunt), pn = prey && W.nations[prey.own];
   const action = prey && pn ? 'PATROL — hunting '+pn.name+' '+prey.k : ORDER_NAME[u.ord];
-  title.textContent = n.name+' · '+action+' · ORG '+Math.round(u.str*100)+'% · '+
+  title.textContent = n.name+' · '+action+' · ORG '+Math.round(u.org*100)+'% · STR '+Math.round(u.str*100)+'% · '+
     nf.format(Math.round(u.qty||0))+' '+LOAD_LABEL[u.k];
 }
 function compactQty(v){
@@ -1989,6 +1997,12 @@ function reinforce(n){
   const rate = 0.014 + 0.00042*(n.p.budgetScore||0);
   n.units.forEach(u=>{
     if(u.str < 1) u.str = Math.min(1, u.str + rate*(0.6 + Math.random()*0.8));
+    const moving=Math.hypot((u.destX??u.x)-u.x,(u.destY??u.y)-u.y)>.5;
+    u.org=Math.max(0,Math.min(1,(u.org??1)+(moving?-.008:.035)*(0.65+rate*12)));
+    if(u.ord==='defend'&&!moving) u.entrench=Math.min(1,(u.entrench||0)+.045);
+    else u.entrench=Math.max(0,(u.entrench||0)-.08);
+    if(u.ord==='invade'&&!moving) u.plan=Math.min(1,(u.plan||0)+.025);
+    else if(moving) u.plan=Math.max(0,(u.plan||0)-.012);
   });
   syncFormationLoads(n);
 }
@@ -2040,11 +2054,11 @@ function nearestOwnedTerr(n, x, y){
     const d=Math.hypot(c[0]-x,c[1]-y); if(d<bd){bd=d;best=t;} });
   return best;
 }
-function nearestEnemyUnit(u, foes, radius){
+function nearestEnemyUnit(u, foes, radius, kind){
   let best=null, bd=radius;
   foes.forEach(code=>{
     const e=W.nations[code]; if(!e||!e.alive) return;
-    e.units.forEach(v=>{ if(v.str<=0.02) return;
+    e.units.forEach(v=>{ if(v.str<=0.02||(kind&&v.k!==kind)) return;
       const d=Math.hypot(v.x-u.x,v.y-u.y); if(d<bd){bd=d;best=v;} });
   });
   return best;
@@ -2101,18 +2115,20 @@ function moveForces(n){
   n.units.forEach(u=>{
     if(u.k !== 'air') return;
     u.hunt=null;
+    let freeTarget=null;
     if(!n.terr.has(u.t)){
       const pool=[...n.terr]; if(pool.length) u.t=pool[(Math.random()*pool.length)|0];
     } else if(u.ord==='invade' && fr.size && !fr.has(u.t) && Math.random()<0.65){
       const pool=[...fr]; if(pool.length) u.t=pool[(Math.random()*pool.length)|0];
     } else if(u.ord==='patrol'){
-      const prey=nearestEnemyUnit(u,foes,170);
-      if(prey){ u.hunt=prey.id; const goal=nearestOwnedTerr(n,prey.x,prey.y); if(goal)u.t=goal; }
+      const prey=nearestEnemyUnit(u,foes,Infinity,'air');
+      if(prey){ u.hunt=prey.id; freeTarget=[prey.x,prey.y]; }
       else if(n.terr.size>1 && Math.random()<0.34){ const pool=[...n.terr]; u.t=pool[(Math.random()*pool.length)|0]; }
     }
     const i = 40 + (u.id % 5);
     let p = terrPt(u.t, i);
-    if(u.ord==='invade'&&objective) p=[objective.p[0]+(u.id%5-2)*3,objective.p[1]+((u.id*3)%5-2)*3];
+    if(freeTarget) p=freeTarget;
+    else if(u.ord==='invade'&&objective) p=[objective.p[0]+(u.id%5-2)*.08,objective.p[1]+((u.id*3)%5-2)*.08];
     setCourse(u,p[0],p[1]);
     updateUnitTitle(u,n);
   });
@@ -2125,7 +2141,7 @@ function moveForces(n){
     u.hunt=null;
     let goalT = null, goal=null, gd = 1e9;
     if(u.ord==='patrol'){
-      const prey=nearestEnemyUnit(u,foes,125);
+      const prey=nearestEnemyUnit(u,foes,Infinity,'fleet');
       if(prey){ u.hunt=prey.id; goal=[prey.x,prey.y]; }
     }
     if(!goal && u.ord==='invade' && objective){
@@ -2235,32 +2251,47 @@ function committedShare(n, kind, committed){
   n.units.forEach(u=>{ if(u.k===kind && u.str>0.02) total += u.str; });
   return total ? Math.min(1, committed/total) : 0;
 }
+const MAP_MILES=24901/GEO.w, AIR_INTERCEPT=5/MAP_MILES;
+function unitValue(u,attack){
+  const role=attack?(1+.35*(u.plan||0)):(1+.45*(u.entrench||0));
+  return u.str*Math.max(.05,u.org??1)*role;
+}
+function closeAirPairs(a,b){
+  const pairs=[],used=new Set();
+  a.forEach(x=>{let best=null,bd=AIR_INTERCEPT;b.forEach(y=>{if(used.has(y.id))return;const d=Math.hypot(x.x-y.x,x.y-y.y);if(d<=bd){bd=d;best=y;}});if(best){used.add(best.id);pairs.push([x,best]);}});
+  return pairs;
+}
 /* which of a nation's formations can actually reach this front, and how hard
    they can push once there */
 function commit(n, from, to, th){
-  const g = [], a = [], f = [];
-  let gm = 0, am = 0, fm = 0;
+  let g = [], a = [], f = [];
   n.units.forEach(u=>{
-    if(u.str <= 0.02) return;
+    if(u.str <= 0.02||(u.org??1)<.05) return;
     if(u.k === 'army'){
-      if(from.has(u.t) || to.has(u.t)){ g.push(u); gm += u.str; }
+      if(from.has(u.t) || to.has(u.t)) g.push(u);
     } else if(u.k === 'air'){
       const q = nearPt(u.x, u.y, to);
-      if(q.d < 300){ a.push(u); am += u.str*(1 - q.d/430); u.tgt = q.p; }
+      if(q.d < 300){ a.push(u); u.tgt = q.p; }
     } else if(u.k === 'fleet'){
       const q = nearPt(u.x, u.y, to);
-      if(q.d < 120){ f.push(u); fm += u.str*(1 - q.d/190); u.tgt = q.p; }
+      if(q.d < 120){ f.push(u); u.tgt = q.p; }
     }
   });
+  const width=th==='sea'?4:8;
+  g=g.sort((x,y)=>unitValue(y,true)-unitValue(x,true)).slice(0,width);
+  a=a.sort((x,y)=>unitValue(y,true)-unitValue(x,true)).slice(0,12);
+  f=f.sort((x,y)=>unitValue(y,true)-unitValue(x,true)).slice(0,10);
+  const gm=g.reduce((s,u)=>s+u.str,0),am=a.reduce((s,u)=>s+u.str,0),fm=f.reduce((s,u)=>s+u.str,0);
   const gShare = committedShare(n,'army',gm), aShare = committedShare(n,'air',am),
         fShare = committedShare(n,'fleet',fm);
   /* A fleet marker represents up to ten vessels. Committing every marker still
      commits the exact inventory; half the markers commits roughly half. */
-  const gMass = branchInventory(n,'ground') * Math.sqrt(gShare);
-  const aMass = branchInventory(n,'air') * Math.sqrt(aShare);
-  const fMass = branchInventory(n,'naval') * Math.sqrt(fShare);
+  const ready=us=>us.length?us.reduce((s,u)=>s+unitValue(u,true),0)/us.length:0;
+  const gMass = branchInventory(n,'ground') * Math.sqrt(gShare)*ready(g);
+  const aMass = branchInventory(n,'air') * Math.sqrt(aShare)*ready(a);
+  const fMass = branchInventory(n,'naval') * Math.sqrt(fShare)*ready(f);
   const naval = fMass * (th==='sea' ? 1.25 : 0.55);
-  return {g, a, f, gm:gMass, am:aMass, fm:fMass,
+  return {g, a, f, gm:gMass, am:aMass, fm:fMass,width,widthUsed:g.length,
           counts:{personnel:(n.active||0)*gShare,vehicles:(n.vehicles||0)*gShare,
                   tanks:(n.tanks||0)*gShare,aircraft:(n.aircraft||0)*aShare,
                   warships:(n.warships||0)*fShare},
@@ -2274,7 +2305,8 @@ function bleed(c, amount){
   for(let i=0; i<all.length && left>0; i++){
     const u = all[(Math.random()*all.length)|0];
     const take = Math.min(u.str, left*(0.25 + Math.random()*0.55));
-    u.str -= take; left -= take;
+    u.org=Math.max(0,(u.org??1)-take*1.8);
+    u.str -= take*(.35+.65*(1-(u.org??0))); left -= take;
     if(take > 0.015) hitFlash(u);
     if(u.str <= 0.02){
       const n = W.nations[u.own];
@@ -2291,13 +2323,13 @@ function faceTarget(u,p){
   u.heading=Math.atan2(p[1]-u.y,p[0]-u.x)*180/Math.PI+(u.k==='air'?90:0);
   u.glyph.setAttribute('transform','rotate('+u.heading.toFixed(1)+')');
 }
-/* Aircraft now attack hostile wings and ships before striking territory; fleets
+/* Aircraft dogfight hostile wings only after a five-mile intercept; fleets
    maneuver against opposing task forces before bombarding the coast. */
 function depict(c, enemy, to, bow){
   const tgt = [...to];
   if(!tgt.length) return;
   const pick = ()=>{ const t = tgt[(Math.random()*tgt.length)|0]; return (GD[t]&&GD[t].c)||null; };
-  const hostileAir=(enemy.a||[]).concat(enemy.f||[]), hostileFleet=enemy.f||[];
+  const hostileAir=enemy.a||[], hostileFleet=enemy.f||[];
   c.a.forEach(u=>{ if(Math.random()<0.70){
     const v=hostileAir.length?hostileAir[(Math.random()*hostileAir.length)|0]:null, p=v?[v.x,v.y]:pick();
     if(p){ faceTarget(u,p); fire([u.x,u.y],p,'sortie',900,bow*1.4); if(v&&Math.random()<.3)spark(p); }
@@ -2476,7 +2508,7 @@ function closeWar(k, why){
 }
 
 /* damage, spread across the arms this nation actually fights with */
-function attrite(n, th, f){
+function attrite(n, th, f, activity){
   const rel = REL[th], w = n.doc;
   const before = Object.fromEntries(INVK.map(k=>[k,n[k]||0]));
   /* A state fighting on three fronts is not wearing out three armies. It is
@@ -2487,6 +2519,8 @@ function attrite(n, th, f){
      it fights. */
   f /= Math.sqrt(Math.max(1, n.fronts||1));
   ARMS.forEach(k=>{
+    if(k==='air'&&activity&&!activity.air)return;
+    if(k==='naval'&&activity&&!activity.naval)return;
     const share = 0.35 + 1.5*rel[k]*w[k];
     const d = DOM[k];
     n.p[d.pillar] = Math.max(0, (n.p[d.pillar]||0) * (1 - f*share));
@@ -2537,6 +2571,19 @@ function engage(k){
   const aimA = toA.size ? toA : fromB, aimB = toB.size ? toB : fromA;
   const CA = commit(A, fromA, aimA, th);
   const CB = commit(B, fromB, aimB, th);
+  /* Air wings may travel without range limits, but cannot exchange fire until
+     two formations are within five real-world miles on this projection. */
+  const airPairs=closeAirPairs(CA.a,CB.a), airA=airPairs.map(p=>p[0]), airB=airPairs.map(p=>p[1]);
+  const av=airA.reduce((s,u)=>s+unitValue(u,true),0),bv=airB.reduce((s,u)=>s+unitValue(u,true),0);
+  let airSupA=CA.a.length&&!CB.a.length ? .9 : (!CA.a.length&&CB.a.length ? .1 : .5);
+  if(av+bv>0)airSupA=av/(av+bv);
+  const navalPairs=[];
+  CA.f.forEach(x=>CB.f.forEach(y=>{if(Math.hypot(x.x-y.x,x.y-y.y)<=25/MAP_MILES)navalPairs.push([x,y]);}));
+  CA.mass=CA.gm+CA.am*.8*(.30+.70*airSupA)+CA.fm*(th==='sea'?1.25:.55);
+  CB.mass=CB.gm+CB.am*.8*(.30+.70*(1-airSupA))+CB.fm*(th==='sea'?1.25:.55);
+  CA.a=airA;CB.a=airB;
+  w.airA=airSupA;w.airPairs=airPairs.length;w.navalPairs=navalPairs.length;
+  w.widthA=CA.widthUsed;w.widthB=CB.widthUsed;w.width=CA.width;
 
   /* The exchange is settled in log-odds, the only form in which both of the
      rules it must obey can be stated at once. The tech weight is measured, not
@@ -2591,6 +2638,7 @@ function engage(k){
   z += (Math.random() + Math.random() + Math.random() - 1.5) * NOISE;
 
   const odds = 1/(1 + Math.exp(-Math.max(-9, Math.min(9, z))));
+  w.odds=odds;w.phase=odds>.62?'BREAKTHROUGH':odds<.38?'HOLDING':'CONTESTED';
 
   /* the watched front always gets drawn; the rest share what is left */
   if(watched(A,B) || W.shots > 0){
@@ -2614,8 +2662,9 @@ function engage(k){
 
   /* both sides burn materiel; the one losing the exchange burns more */
   const inten = 0.0075 + 0.013*Math.min(1, Math.abs(odds-0.5)*2);
-  const lossA = attrite(A, th, inten*(odds<0.5 ? 1.45 : 0.70));
-  const lossB = attrite(B, th, inten*(odds>0.5 ? 1.45 : 0.70));
+  const activity={air:airPairs.length>0,naval:navalPairs.length>0};
+  const lossA = attrite(A, th, inten*(odds<0.5 ? 1.45 : 0.70),activity);
+  const lossB = attrite(B, th, inten*(odds>0.5 ? 1.45 : 0.70),activity);
   if(watched(A,B) && W.turn%6===0)
     say('dim','   '+dateOf(W.turn)+' losses · '+A.flag+' '+A.name+' '+lossSummary(lossA,th)+
       ' · '+B.flag+' '+B.name+' '+lossSummary(lossB,th));
