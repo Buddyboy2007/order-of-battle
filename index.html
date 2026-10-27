@@ -371,6 +371,10 @@ body.theatre{overflow:hidden}
 #uni .wk{opacity:.30}
 #uni g.mine{opacity:1}
 #uni .hit path,#uni .hit circle,#uni .hit rect{stroke:#FFE07A;stroke-width:2}
+#uni .qty{display:none;fill:#E9FAFF;stroke:#031018;stroke-width:2.4;paint-order:stroke fill;
+  font-family:"IBM Plex Mono",monospace;font-size:6.5px;font-weight:600;letter-spacing:-.04em;
+  pointer-events:none;dominant-baseline:middle}
+#uni g.mine .qty,#uni.near g:not(.fleet) .qty{display:inline}
 
 #shots path{fill:none;stroke-width:1.1;vector-effect:non-scaling-stroke;stroke-linecap:round}
 #shots path.icbm{stroke:#FF6A52;stroke-width:1.6}
@@ -487,7 +491,7 @@ body.theatre{overflow:hidden}
           <li><b>Neighbours only.</b> A state may only declare on a country it shares a border with. A state with no foreign border left — an island, or one that has swallowed everyone around it — puts troops on ships instead, and only then.</li>
           <li><b>Doctrine.</b> Each side fights the way its own numbers say it fights. The United States comes out air-led with everything behind it; Chile comes out naval-led; Switzerland is ground and nothing else. None of it is hand-written — it is read off the pillar scores and the hardware each country keeps per soldier.</li>
           <li><b>The line.</b> Every month the front shifts a little toward whoever is winning the exchange, and both sides lose materiel doing it. A province changes hands when the line finally breaks.</li>
-          <li><b>Duration.</b> Most wars take somewhere between ten and fifty months to settle. Even ones can run for decades, or burn out in a ceasefire.</li>
+          <li><b>Duration.</b> Wars do not expire into ceasefires or draws. A front keeps grinding until a country falls, and the simulation stops only when one country remains.</li>
           <li><b>Last resort.</b> A nuclear state facing annihilation may not go quietly.</li>
         </ol>
       </div>
@@ -570,7 +574,7 @@ body.theatre{overflow:hidden}
   </section>
 
   <footer>
-    <p><strong>About the numbers.</strong> Every figure on the cards and on the map — personnel, ground vehicles, tanks, naval vessels, aircraft, warheads, budget, and the six ATLAS pillar scores — is taken from GlobalMilitary.net's 2026 ATLAS and branch inventory tables, updated between 18 and 27 October 2026. Those real inventory counts determine the mass committed to each front and the equipment lost there; the branch scores continue to represent quality, composition and availability. The engagement simulation remains a <em>game mechanic</em> with deliberate randomness, not a forecast. Real conflicts turn on terrain, alliances, logistics, intelligence and political will that no index captures. The world map uses Natural Earth 110m boundaries on an Equal Earth projection; adjacency is derived from those boundaries, with sea crossings measured as real distances and gated on fleet strength. Unranked sovereign states use public order-of-magnitude estimates and are labelled <em>est.</em> wherever they appear. Borders, alliances and the idea that nations simply absorb one another are the game\u2019s, not the world\u2019s.</p>
+    <p><strong>About the numbers.</strong> Every figure on the cards and on the map — personnel, ground vehicles, tanks, naval vessels, aircraft, warheads, budget, and the six ATLAS pillar scores — is taken from GlobalMilitary.net's 2026 ATLAS and branch inventory tables, updated between 18 and 27 October 2026. On the situation map, <strong>one ship symbol is one naval vessel</strong>; ground and air hardware is grouped into readable formations whose printed labels show how many real vehicles or aircraft they represent. Those inventory counts determine the mass committed to each front and the equipment lost there; the branch scores continue to represent quality, composition and availability. The engagement simulation remains a <em>game mechanic</em> with deliberate randomness, not a forecast. Real conflicts turn on terrain, alliances, logistics, intelligence and political will that no index captures. The world map uses Natural Earth 110m boundaries on an Equal Earth projection; adjacency is derived from those boundaries, with sea crossings measured as real distances and gated on fleet strength. Unranked sovereign states use public order-of-magnitude estimates and are labelled <em>est.</em> wherever they appear. Borders, alliances and the idea that nations simply absorb one another are the game\u2019s, not the world\u2019s.</p>
   </footer>
 </div>
 
@@ -600,7 +604,7 @@ body.theatre{overflow:hidden}
       <span class="tx">DEFCON<i id="dconTx">Peace</i></span>
     </div>
     <span class="yr"><b id="tYear">Jan 2026</b></span>
-    <span class="yr" style="border:0;padding-left:0"><b id="tNations">0</b> states &nbsp;·&nbsp; <b id="tWars">0</b> wars &nbsp;·&nbsp; <b id="tUnits">0</b> formations</span>
+    <span class="yr" style="border:0;padding-left:0"><b id="tNations">0</b> states &nbsp;·&nbsp; <b id="tWars">0</b> wars &nbsp;·&nbsp; <b id="tUnits">0</b> units</span>
     <span class="sp"></span>
     <button type="button" class="tbtn prim" id="btnPlay">Pause</button>
     <div class="seg" role="group" aria-label="Speed">
@@ -1487,7 +1491,22 @@ function contact(A, B){
   A.terr.forEach(t=> (SEA[t]||[]).forEach(s=>{
     if(s.km<=r && W.owner[s.t]===B.code && !blocked(s.t)) sea.push({from:t,to:s.t,km:s.km});
   }));
-  return {th:'sea', e:sea};
+  if(sea.length) return {th:'sea', e:sea};
+  /* The premise requires a single survivor. Once ordinary naval links run out,
+     the closest two shores become an expedition route: merchant lift, airlift
+     and improvised basing keep isolated survivors from becoming an eternal
+     draw. Distance and the amphibious-defender penalty still make it costly. */
+  let best = null, bd = Infinity;
+  A.terr.forEach(from=>{
+    const a = GD[from]&&GD[from].c; if(!a) return;
+    B.terr.forEach(to=>{
+      if(blocked(to)) return;
+      const b = GD[to]&&GD[to].c; if(!b) return;
+      const d = Math.hypot(a[0]-b[0],a[1]-b[1]);
+      if(d<bd){ bd=d; best={from,to,km:d,expedition:true}; }
+    });
+  });
+  return {th:'sea', e:best?[best]:[]};
 }
 /* Ground changes hands one province at a time, and only where the front is. */
 function capture(A, B, edges, t){
@@ -1700,7 +1719,8 @@ function mkUnit(n, k, t, x, y){
   const g = document.createElementNS('http://www.w3.org/2000/svg','g');
   g.setAttribute('class','u '+k);
   g.setAttribute('data-u', u.id);
-  g.innerHTML = '<title></title>'+(URING[k] ? '<circle class="ring" r="'+URING[k]+'"></circle>' : '') + GLYPH[k];
+  g.innerHTML = '<title></title>'+(URING[k] ? '<circle class="ring" r="'+URING[k]+'"></circle>' : '') + GLYPH[k] +
+    (k==='fleet' ? '' : '<text class="qty" x="7" y="0"></text>');
   g.style.stroke = strokeOf(n);
   gUni.appendChild(g);
   u.el = g;
@@ -1758,8 +1778,16 @@ function syncFormationLoads(n){
       u.qty = totals[kind]*u.str/strength;
       const title = u.el && u.el.querySelector('title');
       if(title) title.textContent = n.name+' · '+nf.format(Math.round(u.qty))+' '+labels[kind];
+      const badge = u.el && u.el.querySelector('.qty');
+      if(badge) badge.textContent = compactQty(u.qty);
     });
   }
+}
+function compactQty(v){
+  const q = Math.max(0, Math.round(v));
+  if(q >= 1000000) return (q/1000000).toFixed(q>=10000000?0:1).replace('.0','')+'m';
+  if(q >= 1000) return (q/1000).toFixed(q>=10000?0:1).replace('.0','')+'k';
+  return nf.format(q);
 }
 
 /* ---------- where things stand ---------- */
@@ -1786,21 +1814,28 @@ function offshore(t){
   const l = Math.hypot(dx,dy) || 1;
   return OFFP[t] = [c[0] + dx/l*26, c[1] + dy/l*26];
 }
+/* Every vessel is its own marker. Fan ships around their coast instead of
+   stacking dozens of identical symbols at one coordinate. */
+function offshorePt(t, i){
+  const c = offshore(t);
+  if(!i) return [c[0],c[1]];
+  const a = i*2.39996, r = 1.8 + 0.82*Math.sqrt(i);
+  return [c[0] + Math.cos(a)*r, c[1] + Math.sin(a)*r];
+}
 
 /* ---------- establishment ----------
-   Formation counts are a sub-linear reading of the pillars, so a superpower
-   fields more than a small state without fielding a hundred times more. */
+   Naval markers are literal vessel counts. The far larger ground and air
+   inventories use labelled formations so their exact contents remain legible. */
 function wantUnits(n){
-  const g = n.p.ground||0, m = n.p.manpower||0, nv = n.p.naval||0,
-        ar = n.p.air||0, nu = n.p.nuclear||0;
+  const nu = n.p.nuclear||0;
   /* Conquest raises more formations; inherited islands do not. Scale off how
      far a state has grown past its own starting borders, not off its raw
      province count, or every power with dependencies starts overweight. */
   const sc = 1 + 0.75*Math.log2(Math.max(1, n.terr.size / Math.max(1, n.t0||1)));
   return {
-    army : Math.max(1, Math.min(18, Math.round(Math.pow((g*0.60 + m*0.40)/100, 0.85) * 7 * Math.min(3.2, sc)))),
-    fleet: Math.min(9,  Math.round(Math.pow(nv/100, 1.05) * 5 * Math.min(2.2, sc))),
-    air  : Math.min(10, Math.round(Math.pow(ar/100, 0.95) * 5 * Math.min(2.4, sc))),
+    army : Math.max(1, Math.min(36, Math.ceil(Math.sqrt(Math.max(1,n.vehicles||0))/4) * Math.min(2,sc))),
+    fleet: Math.max(0, Math.round(n.warships||0)),
+    air  : Math.max((n.aircraft||0)>0?1:0, Math.min(30, Math.ceil(Math.sqrt(Math.max(0,n.aircraft||0))/3) * Math.min(2,sc))),
     silo : Math.min(6,  Math.round(Math.pow(nu/100, 0.80) * 4))
   };
 }
@@ -1815,6 +1850,8 @@ function establish(n, initial){
   const have = {army:0, fleet:0, air:0, silo:0};
   n.units.forEach(u=> have[u.k]++);
   const ts = [...n.terr], cs = coastal(n);
+  const coastStack = {};
+  n.units.forEach(u=>{ if(u.k==='fleet') coastStack[u.t]=(coastStack[u.t]||0)+1; });
   /* raise what is missing — only ever one formation a month, so rebuilding a
      shattered army is itself a campaign */
   let raised = 0;
@@ -1825,8 +1862,9 @@ function establish(n, initial){
       }
       const t = k==='fleet' ? cs[(Math.random()*cs.length)|0] : ts[(Math.random()*ts.length)|0];
       if(!t) break;
-      const p = k==='fleet' ? offshore(t) : terrPt(t, have[k]);
+      const p = k==='fleet' ? offshorePt(t, coastStack[t]||0) : terrPt(t, have[k]);
       const u = mkUnit(n, k, t, p[0], p[1]);
+      if(k==='fleet') coastStack[t]=(coastStack[t]||0)+1;
       u.str = initial ? 1 : 0.40;
       have[k]++; raised++;
     }
@@ -1928,24 +1966,27 @@ function moveForces(n){
   });
   /* fleets steam toward whatever enemy coast they can reach */
   const reach = navalReach(n) * 1.0;
+  const fleetStack = {};
   n.units.forEach(u=>{
     if(u.k !== 'fleet') return;
-    let goal = null, gd = 1e9;
+    let goalT = null, gd = 1e9;
     if(foes.size){
       foes.forEach(fc=>{
         const F = W.nations[fc]; if(!F || !F.alive) return;
         F.terr.forEach(t=>{
           if(!(SEA[t]||[]).length || blocked(t)) return;
           const o = offshore(t), d = Math.hypot(o[0]-u.x, o[1]-u.y);
-          if(d < gd){ gd = d; goal = o; }
+          if(d < gd){ gd = d; goalT = t; }
         });
       });
     }
-    if(!goal){
+    if(!goalT){
       const cs = coastal(n);
-      const t = cs[u.id % cs.length];
-      goal = t ? offshore(t) : [u.x, u.y];
+      goalT = cs[u.id % cs.length];
     }
+    const fi = goalT ? (fleetStack[goalT]||0) : 0;
+    if(goalT) fleetStack[goalT] = fi+1;
+    const goal = goalT ? offshorePt(goalT,fi) : [u.x,u.y];
     const dx = goal[0]-u.x, dy = goal[1]-u.y, d = Math.hypot(dx,dy);
     const step = 17 + 26*Math.pow(Math.max(0,n.p.naval||0)/100, 1.2);
     if(d > 2){
@@ -2445,10 +2486,8 @@ function engage(k){
     }
   }
 
-  /* neither side can finish it and neither will budge */
-  const age = W.turn - w.since;
-  if(age > 150 && w.moves === 0 && Math.abs(w.p) < 0.55) closeWar(k, 'fight to exhaustion');
-  else if(age > 420) closeWar(k, 'war grinds to a halt');
+  /* Wars do not expire into a draw. They end only when contact is genuinely
+     lost through destruction, or when one side no longer exists. */
 }
 
 function collapse(loser, victor){
@@ -2485,6 +2524,19 @@ function declare(n){
       m.set(o, (m.get(o)||0)+1);
     }));
     pool = m; th = 'sea';
+    /* No reachable coast is not permanent safety. Prepare an expedition
+       against any surviving state, preferring the geographically nearest. */
+    if(!pool.size){
+      Object.values(W.nations).forEach(o=>{
+        if(!o.alive || o.code===n.code || !o.terr.size) return;
+        let d = Infinity;
+        n.terr.forEach(a=>o.terr.forEach(b=>{
+          const x=GD[a]&&GD[a].c, y=GD[b]&&GD[b].c;
+          if(x&&y) d=Math.min(d,Math.hypot(x[0]-y[0],x[1]-y[1]));
+        }));
+        if(Number.isFinite(d)) pool.set(o.code,1/(1+d));
+      });
+    }
     if(!pool.size) return false;
   }
 
@@ -2508,6 +2560,40 @@ function declare(n){
   if(bs < bar) return false;
   openWar(n, best.o, best.th);
   return true;
+}
+
+function forceConfrontation(alive){
+  if(alive.length<2) return false;
+  const ordered = alive.slice().sort((a,b)=>fieldPower(b)-fieldPower(a));
+  const A = ordered[0];
+  let B = null, bd = Infinity;
+  ordered.slice(1).forEach(o=>{
+    let d = Infinity;
+    A.terr.forEach(a=>o.terr.forEach(b=>{
+      const x=GD[a]&&GD[a].c, y=GD[b]&&GD[b].c;
+      if(x&&y) d=Math.min(d,Math.hypot(x[0]-y[0],x[1]-y[1]));
+    }));
+    if(d<bd){ bd=d; B=o; }
+  });
+  if(!B) return false;
+  delete W.truce[warKey(A.code,B.code)];
+  openWar(A,B,contact(A,B).th);
+  say('big','◆  NO PERMANENT PEACE — '+A.flag+' '+A.name+' opens a final-war front against '+
+      B.flag+' '+B.name+' · '+dateOf(W.turn));
+  return true;
+}
+
+function breakDeadlock(alive){
+  const wars = Object.values(W.wars);
+  if(!wars.length){ forceConfrontation(alive); return; }
+  wars.forEach(w=>{
+    const A=W.nations[w.x], B=W.nations[w.y];
+    if(!A||!B||!A.alive||!B.alive) return;
+    const dir = fieldPower(A)>=fieldPower(B) ? 1 : -1;
+    w.p += dir*0.48;
+    w.broke = Math.min(6,(w.broke||0)+2);
+  });
+  say('big','◆  TOTAL-WAR MOBILISATION — static fronts are reinforced until one line breaks · '+dateOf(W.turn));
 }
 
 /* ground nobody governs — irradiated land that has cooled, mostly */
@@ -2588,9 +2674,11 @@ function runTurn(){
   W.lastSig = sig;
 
   if(alive.length === 1) victory(alive[0]);
-  else if(W.frozen > 240 && W.turn > 360) frozenWorld(alive);
-  else if(!W.nwar){ W.stall = (W.stall||0)+1; if(W.stall > 180) stalemate(alive); }
-  else W.stall = 0;
+  else if(W.frozen > 120 && W.turn > 180){ breakDeadlock(alive); W.frozen=0; }
+  else if(!W.nwar){
+    W.stall = (W.stall||0)+1;
+    if(W.stall > 12){ forceConfrontation(alive); W.stall=0; }
+  } else W.stall = 0;
 }
 
 /* ---------- endings ---------- */
@@ -2606,21 +2694,6 @@ function victory(n){
   banner(n.name+' holds the world',
     n.taken.length+' sovereign states were absorbed over '+Math.round(yearsIn(W.turn))+' years. '+
     (n.code===W.follow ? 'You followed the winner.' : 'Your flag is gone.'));
-}
-function frozenWorld(alive){
-  W.over = true; pause();
-  const top = alive.slice().sort((a,b)=>b.terr.size-a.terr.size);
-  say('nuke', '\u2014  THE LINE HOLDS. '+top.length+' states remain after '+Math.round(yearsIn(W.turn))+
-      ' years and none of them can break the others.');
-  banner('The line holds',
-    top.slice(0,3).map(n=>n.name+' ('+n.terr.size+')').join(', ')+
-    (top.length>3 ? ' and '+(top.length-3)+' more' : '')+
-    ' have fought each other to a standstill. Every one of them is holding more ground than it can bring to a front.');
-}
-function stalemate(alive){
-  W.over = true; pause();
-  say('nuke', '—  THE WORLD SETTLES. '+alive.length+' states remain and none can reach another.');
-  banner('The map stops moving', alive.length+' states remain after '+Math.round(yearsIn(W.turn))+' years. No one is at war with anyone else, and nobody will start.');
 }
 function fallen(loser, victor){
   banner(loser.name+' has fallen', 'Absorbed by '+victor.name+' in '+dateOf(W.turn)+
@@ -2701,7 +2774,8 @@ function startWorld(code){
   say('yr', String(W.year0));
   say('big','   '+Object.values(W.nations).length+' sovereign states take the field. You follow '+me.flag+' '+me.name+
              ' — '+me.docLabel.toLowerCase()+'.');
-  say('dim','   A turn is one month. Wars only start across a shared border; a state with no border left crosses water instead.');
+  say('dim','   A turn is one month. Borders start wars; if the map fragments, expedition routes force the survivors back into contact.');
+  say('dim','   There are no draws or permanent ceasefires. The clock stops only when one country remains.');
   say('dim','   Irradiated ground is black. Click any territory to switch the flag you follow.');
   document.getElementById('tYear').textContent = dateOf(1);
   document.getElementById('tNations').textContent = Object.values(W.nations).length;
