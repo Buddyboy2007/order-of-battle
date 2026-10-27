@@ -458,8 +458,8 @@ body.theatre{overflow:hidden}
       <p>Every ranked military on Earth, on one map, fighting each other without you. Pick a flag, start the clock, and watch the borders move until one of them is the only one left.</p>
     </div>
     <div class="stamp lab">
-      Source data<b>ATLAS Index</b>
-      <span>globalmilitary.net · 22 Oct 2026</span>
+      Source data<b>ATLAS + inventories</b>
+      <span>globalmilitary.net · inventories updated 18–27 Oct 2026</span>
     </div>
     <button type="button" id="themeBtn" class="themebtn lab" aria-live="polite">
       <span id="themeLbl">Auto</span>
@@ -570,7 +570,7 @@ body.theatre{overflow:hidden}
   </section>
 
   <footer>
-    <p><strong>About the numbers.</strong> Every figure on the cards and on the map — personnel, tanks, warships, combat aircraft, warheads, budget, and the six ATLAS pillar scores — is taken from GlobalMilitary.net's ATLAS Index, updated 22 October 2026. The engagement simulation is a <em>game mechanic</em>: it turns those pillar scores into an attrition exchange with deliberate randomness. It is not a forecast, and real conflicts turn on terrain, alliances, logistics, intelligence and political will that no index captures. The world map uses Natural Earth 110m boundaries on an Equal Earth projection; adjacency is derived from those boundaries, with sea crossings measured as real distances and gated on fleet strength. The 38 sovereign states the index does not rank \u2014 Iceland, Bhutan, Tuvalu, the Vatican and the rest \u2014 are on the map with public order-of-magnitude figures put through the same fit that reproduces the ranked countries\u2019 pillar scores; they are labelled <em>est.</em> wherever they appear. Doctrine is derived, not assigned: it comes from how a country\u2019s ground, naval and air pillars stand against each other and how much hardware of each kind it keeps per soldier. Borders, alliances and the idea that nations simply absorb one another are the game\u2019s, not the world\u2019s.</p>
+    <p><strong>About the numbers.</strong> Every figure on the cards and on the map — personnel, ground vehicles, tanks, naval vessels, aircraft, warheads, budget, and the six ATLAS pillar scores — is taken from GlobalMilitary.net's 2026 ATLAS and branch inventory tables, updated between 18 and 27 October 2026. Those real inventory counts determine the mass committed to each front and the equipment lost there; the branch scores continue to represent quality, composition and availability. The engagement simulation remains a <em>game mechanic</em> with deliberate randomness, not a forecast. Real conflicts turn on terrain, alliances, logistics, intelligence and political will that no index captures. The world map uses Natural Earth 110m boundaries on an Equal Earth projection; adjacency is derived from those boundaries, with sea crossings measured as real distances and gated on fleet strength. Unranked sovereign states use public order-of-magnitude estimates and are labelled <em>est.</em> wherever they appear. Borders, alliances and the idea that nations simply absorb one another are the game\u2019s, not the world\u2019s.</p>
   </footer>
 </div>
 
@@ -666,10 +666,40 @@ const EST = /*__EST__*/[{"code":"pan","name":"Panama","flag":"🇵🇦","atlas":
    the interface never pretends otherwise. */
 const WDATA = DATA.concat(EST);
 
+/* GlobalMilitary.net 2026 branch inventories. The original data import used
+   `20` as a missing-value sentinel for many armies and an older combat-hull
+   count for navies. Keep the country records readable, then apply the current
+   ARMS "Total" and SEAS "Total" tables here. A vessel or vehicle in these
+   tables is one real inventory unit in the simulation. */
+const GROUND_VEHICLES_2026 = {
+  usa:168979,chn:27250,rus:16790,kor:13232,ind:15451,ukr:18942,tur:13291,pak:10422,egy:9564,sau:6498,
+  prk:6537,pol:3729,dza:8195,irn:6676,fra:6775,isr:5540,irq:7397,grc:7504,mmr:6460,deu:4684,
+  twn:5430,mar:6400,vnm:7439,aze:5532,gbr:4013,are:9289,jpn:3825,tha:3175,esp:6278,ita:3599,
+  sdn:5215,idn:1918,sgp:3441,bra:2527,jor:2878,kwt:1525,eth:2022,rou:3265,blr:2611,mex:7852,
+  fin:2694,nga:2732,bgd:1511,khm:2202,col:1242,kaz:1934,can:1768,tkm:3587,uzb:2585,mys:1055,
+  eri:488,lka:749,zaf:1637,aus:2650,arg:1447,phl:940,swe:1985,chl:1877,cub:2846,che:2130,
+  ven:1004,srb:1576,nld:858,omn:1082,syr:526,per:1114,lbn:3806,hun:1041,qat:1151,arm:779,
+  bgr:616,cze:600,uga:674,tun:2503,nor:695,dnk:722,ltu:1289,aut:626,cyp:858,bel:1044,
+  hrv:662,prt:638,svk:497,ecu:608,bhr:1228,ken:800,mng:1800,tza:587,est:464,nzl:145
+};
+const NAVAL_VESSELS_2026 = {
+  usa:228,chn:1000,rus:456,jpn:158,ind:354,gbr:62,kor:150,fra:166,ita:312,deu:72,tur:197,twn:90,
+  pak:110,aus:58,idn:344,egy:317,esp:84,vnm:116,grc:141,can:33,dza:101,sgp:55,bra:71,sau:69,
+  nor:60,prk:393,nld:108,isr:52,dnk:109,chl:75,tha:305,mmr:239,bgd:105,zaf:52,mys:99,
+  phl:125,prt:34,swe:261,per:78,are:83,rou:70,mar:106,col:270,pol:75,arg:42,qat:126,ven:91,
+  fin:194,omn:17,bgr:35,ecu:54,mex:260,tun:65,ukr:38,irn:120,bel:9,cub:18,nzl:12,bhr:65,
+  irl:33,lbn:48,nga:146,yem:20,slv:28,dji:29,hrv:31,jor:29,tkm:45,srb:30,eri:23,lka:271,
+  ken:25,khm:21,kwt:36,irq:62,cyp:11,est:7,kaz:9,ltu:12,lby:4,aze:26,syr:0
+};
+WDATA.forEach(c=>{
+  if(GROUND_VEHICLES_2026[c.code]!=null) c.vehicles = GROUND_VEHICLES_2026[c.code];
+  if(NAVAL_VESSELS_2026[c.code]!=null) c.warships = NAVAL_VESSELS_2026[c.code];
+});
+
 /* ---------------- domains ---------------- */
 const DOMAINS = [
-  {k:'ground',  name:'Ground',   pillar:'ground',      unit:'tanks',          uname:'main battle tanks', short:'tanks',    w:20, verb:'armoured thrust'},
-  {k:'air',     name:'Air',      pillar:'air',         unit:'combatAircraft', uname:'combat aircraft',   short:'aircraft', w:25, verb:'air campaign'},
+  {k:'ground',  name:'Ground',   pillar:'ground',      unit:'vehicles',       uname:'ground vehicles',   short:'vehicles', w:20, verb:'armoured thrust'},
+  {k:'air',     name:'Air',      pillar:'air',         unit:'aircraft',       uname:'military aircraft', short:'aircraft', w:25, verb:'air campaign'},
   {k:'naval',   name:'Naval',    pillar:'naval',       unit:'warships',       uname:'warships',          short:'warships', w:20, verb:'fleet action'},
   {k:'manpower',name:'Manpower', pillar:'manpower',    unit:'active',         uname:'active personnel',  short:'troops',   w:10, verb:'ground mobilisation'},
   {k:'nuclear', name:'Nuclear',  pillar:'nuclear',     unit:'warheads',       uname:'warheads',          short:'warheads', w:10, verb:'nuclear standoff'},
@@ -1078,7 +1108,13 @@ Object.keys(GD).forEach(t=> NB[t] = LAND[t].map(x=>({t:x,sea:0}))
                                   .concat(SEA[t].map(e=>({t:e.t,sea:e.km}))));
 
 const PILL = ['manpower','ground','naval','air','nuclear','budgetScore'];
-const INVK = ['active','tanks','warships','combatAircraft','warheads','budget'];
+const INVK = ['active','reserve','paramilitary','tanks','vehicles','warships','carriers','submarines',
+              'aircraft','combatAircraft','bombers','helicopters','warheads','budget'];
+const ARM_INV = {
+  ground:['active','tanks','vehicles'],
+  naval:['warships','carriers','submarines'],
+  air:['aircraft','combatAircraft','bombers','helicopters']
+};
 const SCORCH = 90;          /* months before irradiated ground can be walked on */
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
@@ -1124,15 +1160,16 @@ function assignHues(){
 const TBASE = {};
 function buildBases(){
   const blank = ()=>({p:{manpower:1.3,ground:0.9,naval:0.5,air:0.7,nuclear:0,budgetScore:1.0},
-                      inv:{active:3500,tanks:8,warships:1,combatAircraft:2,warheads:0,budget:1.4e8}, m:1.0});
+                      inv:{active:3500,reserve:0,paramilitary:0,tanks:8,vehicles:20,warships:1,
+                           carriers:0,submarines:0,aircraft:3,combatAircraft:2,bombers:0,
+                           helicopters:1,warheads:0,budget:1.4e8}, m:1.0});
   Object.keys(GD).forEach(t=> TBASE[t] = blank());
   WDATA.forEach(c=>{
     const up = c.code.toUpperCase();
     if(!GD[up]) return;
     TBASE[up] = {
       p:Object.assign({manpower:0,ground:0,naval:0,air:0,nuclear:0,budgetScore:0}, c.p),
-      inv:{active:c.active||0, tanks:c.tanks||0, warships:c.warships||0,
-           combatAircraft:c.combatAircraft||0, warheads:c.warheads||0, budget:c.budget||0},
+      inv:Object.fromEntries(INVK.map(k=>[k,c[k]||0])),
       m: c.atlas!=null ? c.atlas : (c.eidx||1.0)
     };
   });
@@ -1186,9 +1223,9 @@ function doctrineFor(c){
   const w = {};
   if(mean <= 0.05){ ARMS.forEach(k=> w[k] = 1/3); return w; }
   const act = Math.max(500, c.active||1000);
-  const H = {ground:(c.tanks||0),
+  const H = {ground:(c.tanks||0) + 0.12*(c.vehicles||0),
              naval:(c.warships||0)+3*(c.carriers||0)+1.5*(c.submarines||0),
-             air:(c.combatAircraft||0)};
+             air:(c.combatAircraft||0) + 0.30*(c.aircraft||0) + 0.25*(c.helicopters||0)};
   ARMS.forEach(k=>{
     const r = Math.max(0.12, P[k]/mean);
     const h = H[k] > 0 ? Math.max(0.25, Math.min(4, (H[k]/act)/HWMED[k])) : 1;
@@ -1251,9 +1288,12 @@ function initWorld(followUp){
       code:up, name:c.name, flag:c.flag||'🏳️', rank:c.rank||null,
       atlas0: c.atlas!=null ? c.atlas : (c.eidx||0), est: !!c.est,
       p:Object.assign({manpower:0,ground:0,naval:0,air:0,nuclear:0,budgetScore:0}, c.p),
-      active:c.active||0, tanks:c.tanks||0, warships:c.warships||0,
-      combatAircraft:c.combatAircraft||0, warheads:c.warheads||0, budget:c.budget||0,
+      active:c.active||0, reserve:c.reserve||0, paramilitary:c.paramilitary||0,
+      tanks:c.tanks||0, vehicles:c.vehicles||0, warships:c.warships||0,
       carriers:c.carriers||0, submarines:c.submarines||0,
+      aircraft:c.aircraft||0, combatAircraft:c.combatAircraft||0,
+      bombers:c.bombers||0, helicopters:c.helicopters||0,
+      warheads:c.warheads||0, budget:c.budget||0,
       doc:doc, docLabel:doctrineLabel(doc),
       terr:new Set([up]), alive:true, taken:[], fronts:0, idle:0, units:[],
       aggr: 0.55 + Math.random()*1.05, hue:0, sat:34
@@ -1479,7 +1519,8 @@ function absorb(A, B){
   A.active = (A.active||0) + (B.active||0);
   A.p.manpower = (A.p.manpower||0) + (B.p.manpower||0);
   const keep = 0.45;
-  ['tanks','warships','combatAircraft','budget','carriers','submarines'].forEach(k=>{
+  ['tanks','vehicles','warships','combatAircraft','aircraft','helicopters','bombers',
+   'budget','carriers','submarines','reserve','paramilitary'].forEach(k=>{
     A[k] = (A[k]||0) + (B[k]||0)*keep;
   });
   A.warheads = (A.warheads||0) + (B.warheads||0);
@@ -1659,7 +1700,7 @@ function mkUnit(n, k, t, x, y){
   const g = document.createElementNS('http://www.w3.org/2000/svg','g');
   g.setAttribute('class','u '+k);
   g.setAttribute('data-u', u.id);
-  g.innerHTML = (URING[k] ? '<circle class="ring" r="'+URING[k]+'"></circle>' : '') + GLYPH[k];
+  g.innerHTML = '<title></title>'+(URING[k] ? '<circle class="ring" r="'+URING[k]+'"></circle>' : '') + GLYPH[k];
   g.style.stroke = strokeOf(n);
   gUni.appendChild(g);
   u.el = g;
@@ -1706,6 +1747,19 @@ function killUnit(u){
   if(n){ const i = n.units.indexOf(u); if(i>=0) n.units.splice(i,1); }
   UNITS.delete(u.id);
   if(u.el){ u.el.remove(); u.el = null; }
+}
+function syncFormationLoads(n){
+  const totals = {army:n.vehicles||0,fleet:n.warships||0,air:n.aircraft||0,silo:n.warheads||0};
+  const labels = {army:'ground vehicles',fleet:'naval vessels',air:'aircraft',silo:'warheads'};
+  for(const kind of Object.keys(totals)){
+    const us = n.units.filter(u=>u.k===kind && u.str>0.02);
+    const strength = us.reduce((s,u)=>s+u.str,0)||1;
+    us.forEach(u=>{
+      u.qty = totals[kind]*u.str/strength;
+      const title = u.el && u.el.querySelector('title');
+      if(title) title.textContent = n.name+' · '+nf.format(Math.round(u.qty))+' '+labels[kind];
+    });
+  }
 }
 
 /* ---------- where things stand ---------- */
@@ -1785,6 +1839,7 @@ function establish(n, initial){
       killUnit(u); have[k]--;
     }
   }
+  syncFormationLoads(n);
 }
 /* steady reinforcement: losses are made good out of the budget pillar, slowly */
 function reinforce(n){
@@ -1792,6 +1847,7 @@ function reinforce(n){
   n.units.forEach(u=>{
     if(u.str < 1) u.str = Math.min(1, u.str + rate*(0.6 + Math.random()*0.8));
   });
+  syncFormationLoads(n);
 }
 
 /* ---------- orders ---------- */
@@ -1959,6 +2015,23 @@ function nearPt(x, y, tset){
     const d = Math.hypot(c[0]-x, c[1]-y); if(d<bd){ bd=d; bp=c; } });
   return {d:bd, p:bp};
 }
+/* Raw inventories become operational mass here. Counts remain exact in state
+   and in the UI; these divisors only put soldiers, vehicles, aircraft and hulls
+   onto a common frontage scale. The square-rooted formation share below keeps
+   a huge rear-area inventory from all appearing in one province at once. */
+function branchInventory(n, arm){
+  if(arm==='ground') return (n.active||0)/12000 + (n.tanks||0)/90 + (n.vehicles||0)/350;
+  if(arm==='air'){
+    const support = Math.max(0,(n.aircraft||0)-(n.combatAircraft||0)-(n.helicopters||0));
+    return (n.combatAircraft||0)/35 + (n.helicopters||0)/90 + support/180 + (n.bombers||0)/12;
+  }
+  return (n.warships||0)/10 + (n.carriers||0)*2.5 + (n.submarines||0)/5;
+}
+function committedShare(n, kind, committed){
+  let total = 0;
+  n.units.forEach(u=>{ if(u.k===kind && u.str>0.02) total += u.str; });
+  return total ? Math.min(1, committed/total) : 0;
+}
 /* which of a nation's formations can actually reach this front, and how hard
    they can push once there */
 function commit(n, from, to, th){
@@ -1976,8 +2049,20 @@ function commit(n, from, to, th){
       if(q.d < 120){ f.push(u); fm += u.str*(1 - q.d/190); u.tgt = q.p; }
     }
   });
-  const naval = fm * (th==='sea' ? 1.25 : 0.55);
-  return {g, a, f, gm, am, fm, mass: gm + am*0.80 + naval};
+  const gShare = committedShare(n,'army',gm), aShare = committedShare(n,'air',am),
+        fShare = committedShare(n,'fleet',fm);
+  /* A marker is a formation, not one imaginary ship. If Chile commits every
+     fleet marker, all 75 current vessels are represented; half the markers
+     commit roughly half the fleet. */
+  const gMass = branchInventory(n,'ground') * Math.sqrt(gShare);
+  const aMass = branchInventory(n,'air') * Math.sqrt(aShare);
+  const fMass = branchInventory(n,'naval') * Math.sqrt(fShare);
+  const naval = fMass * (th==='sea' ? 1.25 : 0.55);
+  return {g, a, f, gm:gMass, am:aMass, fm:fMass,
+          counts:{personnel:(n.active||0)*gShare,vehicles:(n.vehicles||0)*gShare,
+                  tanks:(n.tanks||0)*gShare,aircraft:(n.aircraft||0)*aShare,
+                  warships:(n.warships||0)*fShare},
+          mass:gMass + aMass*0.80 + naval};
 }
 /* losses fall on the formations that were actually in it */
 function bleed(c, amount){
@@ -2177,6 +2262,7 @@ function closeWar(k, why){
 /* damage, spread across the arms this nation actually fights with */
 function attrite(n, th, f){
   const rel = REL[th], w = n.doc;
+  const before = Object.fromEntries(INVK.map(k=>[k,n[k]||0]));
   /* A state fighting on three fronts is not wearing out three armies. It is
      wearing out one army three times as fast in places, and the same formations
      are being counted again by every war it is in — so the month's losses grow
@@ -2188,11 +2274,28 @@ function attrite(n, th, f){
     const share = 0.35 + 1.5*rel[k]*w[k];
     const d = DOM[k];
     n.p[d.pillar] = Math.max(0, (n.p[d.pillar]||0) * (1 - f*share));
-    if(n[d.unit]!=null) n[d.unit] = Math.max(0, n[d.unit]*(1 - f*share));
+    ARM_INV[k].forEach(inv=>{
+      if(n[inv]!=null) n[inv] = Math.max(0, n[inv]*(1 - f*share));
+    });
   });
   n.p.manpower = Math.max(0, (n.p.manpower||0) * (1 - f*0.75));
-  n.active = Math.max(0, n.active*(1 - f*0.75));
   n.p.budgetScore = Math.max(0, (n.p.budgetScore||0) * (1 - f*0.30));
+  /* Reserves replace a fraction of personnel losses, but are a finite pool.
+     Better-funded forces can mobilise and equip them faster. */
+  const target = potential(n).inv.active||0;
+  const short = Math.max(0, target-(n.active||0));
+  const mobilised = Math.min(n.reserve||0, short*(0.05 + 0.0015*(n.p.budgetScore||0)));
+  n.reserve = Math.max(0,(n.reserve||0)-mobilised);
+  n.active = (n.active||0)+mobilised;
+  return Object.fromEntries(INVK.map(k=>[k,Math.max(0,(before[k]||0)-(n[k]||0))]));
+}
+function lossSummary(loss, th){
+  const parts = [];
+  if(loss.active>=1) parts.push(nf.format(Math.round(loss.active))+' personnel');
+  if(th==='land' && loss.vehicles>=1) parts.push(nf.format(Math.round(loss.vehicles))+' vehicles');
+  if(loss.aircraft>=1) parts.push(nf.format(Math.round(loss.aircraft))+' aircraft');
+  if(th==='sea' && loss.warships>=1) parts.push(nf.format(Math.round(loss.warships))+' vessels');
+  return parts.slice(0,3).join(', ') || 'light materiel losses';
 }
 
 /* one month on one front */
@@ -2295,8 +2398,11 @@ function engage(k){
 
   /* both sides burn materiel; the one losing the exchange burns more */
   const inten = 0.0075 + 0.013*Math.min(1, Math.abs(odds-0.5)*2);
-  attrite(A, th, inten*(odds<0.5 ? 1.45 : 0.70));
-  attrite(B, th, inten*(odds>0.5 ? 1.45 : 0.70));
+  const lossA = attrite(A, th, inten*(odds<0.5 ? 1.45 : 0.70));
+  const lossB = attrite(B, th, inten*(odds>0.5 ? 1.45 : 0.70));
+  if(watched(A,B) && W.turn%6===0)
+    say('dim','   '+dateOf(W.turn)+' losses · '+A.flag+' '+A.name+' '+lossSummary(lossA,th)+
+      ' · '+B.flag+' '+B.name+' '+lossSummary(lossB,th));
   /* and the formations that were in it take their own losses */
   bleed(CA, (0.022 + 0.080*(1-odds)) * (0.45+Math.random()*1.1));
   bleed(CB, (0.022 + 0.080*odds)     * (0.45+Math.random()*1.1));
@@ -2548,10 +2654,17 @@ function renderFocus(){
       '</b> \u00b7 index '+powerOf(n).toFixed(0)+', at the front '+fieldPower(n).toFixed(0)+'</span>'+
     '<span style="grid-column:1/-1;color:var(--ink-3);padding-bottom:5px">'+
       (atWar.length ? 'At war with '+esc(atWar.join(' · ')) : 'At peace')+'</span>'+
-    '<span>Tanks <b>'+nf.format(Math.round(n.tanks))+'</b></span>'+
-    '<span>Aircraft <b>'+nf.format(Math.round(n.combatAircraft))+'</b></span>'+
-    '<span>Warships <b>'+nf.format(Math.round(n.warships))+'</b></span>'+
-    '<span>Troops <b>'+nf.format(Math.round(n.active))+'</b></span>'+
+    '<span>Ground vehicles <b>'+nf.format(Math.round(n.vehicles))+'</b></span>'+
+    '<span>Main battle tanks <b>'+nf.format(Math.round(n.tanks))+'</b></span>'+
+    '<span>All aircraft <b>'+nf.format(Math.round(n.aircraft))+'</b></span>'+
+    '<span>Combat aircraft <b>'+nf.format(Math.round(n.combatAircraft))+'</b></span>'+
+    '<span>Helicopters <b>'+nf.format(Math.round(n.helicopters))+'</b></span>'+
+    '<span>Naval vessels <b>'+nf.format(Math.round(n.warships))+'</b></span>'+
+    '<span>Submarines <b>'+nf.format(Math.round(n.submarines))+'</b></span>'+
+    '<span>Carriers <b>'+nf.format(Math.round(n.carriers))+'</b></span>'+
+    '<span>Active personnel <b>'+nf.format(Math.round(n.active))+'</b></span>'+
+    '<span>Reserve personnel <b>'+nf.format(Math.round(n.reserve))+'</b></span>'+
+    '<span>Paramilitary <b>'+nf.format(Math.round(n.paramilitary))+'</b></span>'+
     '<span>Warheads <b>'+nf.format(Math.round(n.warheads))+'</b></span>'+
     '<span>Flags taken <b>'+n.taken.length+'</b></span>';
 }
