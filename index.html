@@ -371,6 +371,9 @@ body.theatre{overflow:hidden}
 #uni .wk{opacity:.30}
 #uni g.mine{opacity:1}
 #uni .hit path,#uni .hit circle,#uni .hit rect{stroke:#FFE07A;stroke-width:2}
+#uni g[data-order="defend"]>path,#uni g[data-order="defend"]>circle,#uni g[data-order="defend"]>rect{stroke-width:1.05}
+#uni g[data-order="invade"]>path,#uni g[data-order="invade"]>circle,#uni g[data-order="invade"]>rect{stroke-width:1.65}
+#uni g[data-order="patrol"]>path,#uni g[data-order="patrol"]>circle,#uni g[data-order="patrol"]>rect{stroke-dasharray:2.2 1.4}
 #uni .qty{display:none;fill:#E9FAFF;stroke:#031018;stroke-width:2.4;paint-order:stroke fill;
   font-family:"IBM Plex Mono",monospace;font-size:6.5px;font-weight:600;letter-spacing:-.04em;
   pointer-events:none;dominant-baseline:middle}
@@ -491,6 +494,7 @@ body.theatre{overflow:hidden}
           <li><b>Neighbours only.</b> A state may only declare on a country it shares a border with. A state with no foreign border left — an island, or one that has swallowed everyone around it — puts troops on ships instead, and only then.</li>
           <li><b>Doctrine.</b> Each side fights the way its own numbers say it fights. The United States comes out air-led with everything behind it; Chile comes out naval-led; Switzerland is ground and nothing else. None of it is hand-written — it is read off the pillar scores and the hardware each country keeps per soldier.</li>
           <li><b>The line.</b> Every month the front shifts a little toward whoever is winning the exchange, and both sides lose materiel doing it. A province changes hands when the line finally breaks.</li>
+          <li><b>Orders.</b> Every unit is assigned to defend, invade or patrol. Defenders hold their post, invaders push toward an active front, and patrols roam until they detect a nearby enemy and hunt it.</li>
           <li><b>Duration.</b> Wars do not expire into ceasefires or draws. A front keeps grinding until a country falls, and the simulation stops only when one country remains.</li>
           <li><b>Last resort.</b> A nuclear state facing annihilation may not go quietly.</li>
         </ol>
@@ -1279,6 +1283,7 @@ function combatant(n){
 
 function initWorld(followUp){
   W.turn = 1; W.owner = {}; W.nations = {}; W.scorch = {}; W.over = false;
+  UID = 1;
   Object.keys(GD).forEach(t => W.owner[t] = null);
 
   W.wars = {}; W.truce = {}; W.nwar = 0; W.resist = {}; W.defcon = 5;
@@ -1519,7 +1524,8 @@ function capture(A, B, edges, t){
   if(c){
     let best = null, bd = 1e9;
     A.units.forEach(u=>{ if(u.k!=='army' || u.str<=0.05) return;
-      const d = Math.hypot(u.x-c[0], u.y-c[1]); if(d<bd){ bd=d; best=u; } });
+      const role = u.ord==='invade' ? 0.62 : u.ord==='patrol' ? 0.88 : 1.35;
+      const d = Math.hypot(u.x-c[0], u.y-c[1])*role; if(d<bd){ bd=d; best=u; } });
     if(best){ best.t = t; const q = terrPt(t, 0); place(best, q[0], q[1]); }
   }
   return t;
@@ -1712,13 +1718,28 @@ const GLYPH = {
   silo : '<circle r="4.3"></circle><path d="M0 -4.3L0 4.3"></path>'
 };
 const URING = {fleet:16, silo:0, air:0, army:0};
+const ORDER_NAME = {defend:'DEFEND', invade:'INVADE', patrol:'PATROL'};
+const LOAD_LABEL = {army:'ground vehicles',fleet:'naval vessels',air:'aircraft',silo:'warheads'};
+
+function orderFor(n, k, id){
+  if(k==='silo') return 'defend';
+  /* Stable assignments keep a unit's job understandable from month to month.
+     Branches use different mixes: fleets patrol more, armies hold more. */
+  const mix = k==='fleet' ? [26,62] : k==='air' ? [30,72] : [38,78];
+  let seed = id*73;
+  for(let i=0;i<n.code.length;i++) seed += n.code.charCodeAt(i)*(i+11);
+  const roll = ((seed%100)+100)%100;
+  return roll < mix[0] ? 'defend' : roll < mix[1] ? 'invade' : 'patrol';
+}
 
 function mkUnit(n, k, t, x, y){
-  const u = {id:UID++, k, own:n.code, t, x, y, str:1, ord:null, tgt:null,
+  const id = UID++, ord = orderFor(n,k,id);
+  const u = {id, k, own:n.code, t, x, y, str:1, ord, tgt:null, hunt:null,
              el:null, mark:0, home:t};
   const g = document.createElementNS('http://www.w3.org/2000/svg','g');
   g.setAttribute('class','u '+k);
   g.setAttribute('data-u', u.id);
+  g.setAttribute('data-order', ord);
   g.innerHTML = '<title></title>'+(URING[k] ? '<circle class="ring" r="'+URING[k]+'"></circle>' : '') + GLYPH[k] +
     (k==='fleet' ? '' : '<text class="qty" x="7" y="0"></text>');
   g.style.stroke = strokeOf(n);
@@ -1770,18 +1791,22 @@ function killUnit(u){
 }
 function syncFormationLoads(n){
   const totals = {army:n.vehicles||0,fleet:n.warships||0,air:n.aircraft||0,silo:n.warheads||0};
-  const labels = {army:'ground vehicles',fleet:'naval vessels',air:'aircraft',silo:'warheads'};
   for(const kind of Object.keys(totals)){
     const us = n.units.filter(u=>u.k===kind && u.str>0.02);
     const strength = us.reduce((s,u)=>s+u.str,0)||1;
     us.forEach(u=>{
       u.qty = totals[kind]*u.str/strength;
-      const title = u.el && u.el.querySelector('title');
-      if(title) title.textContent = n.name+' · '+nf.format(Math.round(u.qty))+' '+labels[kind];
+      updateUnitTitle(u,n);
       const badge = u.el && u.el.querySelector('.qty');
       if(badge) badge.textContent = compactQty(u.qty);
     });
   }
+}
+function updateUnitTitle(u,n){
+  const title = u.el && u.el.querySelector('title'); if(!title) return;
+  const prey = u.hunt && UNITS.get(u.hunt), pn = prey && W.nations[prey.own];
+  const action = prey && pn ? 'PATROL — hunting '+pn.name+' '+prey.k : ORDER_NAME[u.ord];
+  title.textContent = n.name+' · '+action+' · '+nf.format(Math.round(u.qty||0))+' '+LOAD_LABEL[u.k];
 }
 function compactQty(v){
   const q = Math.max(0, Math.round(v));
@@ -1929,22 +1954,49 @@ function marchStep(n, from, goals){
   }
   return null;
 }
+function nearestOwnedTerr(n, x, y){
+  let best=null, bd=Infinity;
+  n.terr.forEach(t=>{ const c=GD[t]&&GD[t].c; if(!c) return;
+    const d=Math.hypot(c[0]-x,c[1]-y); if(d<bd){bd=d;best=t;} });
+  return best;
+}
+function nearestEnemyUnit(u, foes, radius){
+  let best=null, bd=radius;
+  foes.forEach(code=>{
+    const e=W.nations[code]; if(!e||!e.alive) return;
+    e.units.forEach(v=>{ if(v.str<=0.02) return;
+      const d=Math.hypot(v.x-u.x,v.y-u.y); if(d<bd){bd=d;best=v;} });
+  });
+  return best;
+}
 
 function moveForces(n){
   const foes = enemiesOf(n);
   const fr = foes.size ? frontTerr(n, foes) : new Set();
   const stack = {};
-  /* armies march to the sound of the guns; in peace they garrison outward */
+  /* Defenders hold ground, invaders march to the front, and patrols sweep
+     friendly territory until an enemy enters their search radius. */
   n.units.forEach(u=>{
     if(u.k !== 'army') return;
+    u.hunt = null;
     let dest = u.t;
     if(!n.terr.has(u.t)){                 /* the ground under it changed hands */
       const near = [...n.terr];
       dest = near.length ? near[(Math.random()*near.length)|0] : u.t;
-    } else if(fr.size && !fr.has(u.t)){
+    } else if(u.ord==='invade' && fr.size && !fr.has(u.t)){
       const hop = marchStep(n, u.t, fr);
       if(hop) dest = hop;
-    } else if(!fr.size && n.terr.size > 1 && Math.random() < 0.22){
+    } else if(u.ord==='patrol'){
+      const prey = nearestEnemyUnit(u,foes,105);
+      if(prey){
+        u.hunt=prey.id;
+        const goal=nearestOwnedTerr(n,prey.x,prey.y);
+        if(goal && goal!==u.t){ const hop=marchStep(n,u.t,new Set([goal])); if(hop) dest=hop; }
+      } else if(n.terr.size>1 && Math.random()<0.48){
+        const opts=(LAND[u.t]||[]).filter(x=>W.owner[x]===n.code);
+        if(opts.length) dest=opts[(Math.random()*opts.length)|0];
+      }
+    } else if(u.ord==='invade' && !fr.size && n.terr.size > 1 && Math.random() < 0.22){
       const opts = (LAND[u.t]||[]).filter(x=> W.owner[x] === n.code);
       if(opts.length) dest = opts[(Math.random()*opts.length)|0];
     }
@@ -1952,25 +2004,40 @@ function moveForces(n){
     const i = (stack[dest] = (stack[dest]||0)) ; stack[dest]++;
     const p = terrPt(dest, i);
     place(u, p[0], p[1]);
+    updateUnitTitle(u,n);
   });
-  /* air wings rebase onto the front so their sorties reach */
+  /* Air defenders stay over their base. Invaders rebase forward; patrols
+     scramble toward any hostile formation detected nearby. */
   n.units.forEach(u=>{
     if(u.k !== 'air') return;
-    if(!n.terr.has(u.t) || (fr.size && !fr.has(u.t) && Math.random() < 0.5)){
-      const pool = fr.size ? [...fr] : [...n.terr];
-      if(pool.length) u.t = pool[(Math.random()*pool.length)|0];
+    u.hunt=null;
+    if(!n.terr.has(u.t)){
+      const pool=[...n.terr]; if(pool.length) u.t=pool[(Math.random()*pool.length)|0];
+    } else if(u.ord==='invade' && fr.size && !fr.has(u.t) && Math.random()<0.65){
+      const pool=[...fr]; if(pool.length) u.t=pool[(Math.random()*pool.length)|0];
+    } else if(u.ord==='patrol'){
+      const prey=nearestEnemyUnit(u,foes,170);
+      if(prey){ u.hunt=prey.id; const goal=nearestOwnedTerr(n,prey.x,prey.y); if(goal)u.t=goal; }
+      else if(n.terr.size>1 && Math.random()<0.34){ const pool=[...n.terr]; u.t=pool[(Math.random()*pool.length)|0]; }
     }
     const i = 40 + (u.id % 5);
     const p = terrPt(u.t, i);
     place(u, p[0], p[1]);
+    updateUnitTitle(u,n);
   });
-  /* fleets steam toward whatever enemy coast they can reach */
-  const reach = navalReach(n) * 1.0;
+  /* Fleet defenders guard home waters. Invaders steam for hostile coasts.
+     Patrol ships circulate between stations and break off to hunt anything
+     hostile that comes inside their detection radius. */
   const fleetStack = {};
   n.units.forEach(u=>{
     if(u.k !== 'fleet') return;
-    let goalT = null, gd = 1e9;
-    if(foes.size){
+    u.hunt=null;
+    let goalT = null, goal=null, gd = 1e9;
+    if(u.ord==='patrol'){
+      const prey=nearestEnemyUnit(u,foes,125);
+      if(prey){ u.hunt=prey.id; goal=[prey.x,prey.y]; }
+    }
+    if(!goal && u.ord==='invade' && foes.size){
       foes.forEach(fc=>{
         const F = W.nations[fc]; if(!F || !F.alive) return;
         F.terr.forEach(t=>{
@@ -1980,19 +2047,24 @@ function moveForces(n){
         });
       });
     }
-    if(!goalT){
+    if(!goal && !goalT){
       const cs = coastal(n);
-      goalT = cs[u.id % cs.length];
+      if(u.ord==='defend' && n.terr.has(u.home) && (SEA[u.home]||[]).length) goalT=u.home;
+      else goalT = cs[(u.id + (u.ord==='patrol' ? Math.floor(W.turn/8) : 0)) % cs.length];
     }
-    const fi = goalT ? (fleetStack[goalT]||0) : 0;
-    if(goalT) fleetStack[goalT] = fi+1;
-    const goal = goalT ? offshorePt(goalT,fi) : [u.x,u.y];
+    if(!goal){
+      const fi = goalT ? (fleetStack[goalT]||0) : 0;
+      if(goalT) fleetStack[goalT] = fi+1;
+      goal = goalT ? offshorePt(goalT,fi) : [u.x,u.y];
+    }
+    if(goalT && W.owner[goalT]===n.code) u.t=goalT;
     const dx = goal[0]-u.x, dy = goal[1]-u.y, d = Math.hypot(dx,dy);
     const step = 17 + 26*Math.pow(Math.max(0,n.p.naval||0)/100, 1.2);
     if(d > 2){
       const k = Math.min(1, step/d);
       place(u, u.x + dx*k, u.y + dy*k);
     }
+    updateUnitTitle(u,n);
   });
   /* silos sit still; they exist to be counted and, at the end, used */
   n.units.forEach(u=>{
@@ -2001,6 +2073,7 @@ function moveForces(n){
       const ts = [...n.terr];
       if(ts.length){ u.t = ts[(Math.random()*ts.length)|0]; const p = terrPt(u.t, 30+(u.id%4)); place(u, p[0], p[1]); }
     }
+    updateUnitTitle(u,n);
   });
 }
 
@@ -2722,11 +2795,17 @@ function renderFocus(){
               const mine = (w.x===n.code ? w.p : -w.p);
               return o.flag+' '+o.name+' '+(mine>0.25?'↑':mine<-0.25?'↓':'=');
             }).filter(Boolean);
+  const orders={defend:0,invade:0,patrol:0};
+  n.units.forEach(u=>{ if(orders[u.ord]!=null) orders[u.ord]++; });
   document.getElementById('fStat').innerHTML =
     '<span style="grid-column:1/-1;color:var(--ink-3);padding-bottom:3px"><b style="color:var(--ink)">'+esc(n.docLabel)+
       '</b> \u00b7 index '+powerOf(n).toFixed(0)+', at the front '+fieldPower(n).toFixed(0)+'</span>'+
     '<span style="grid-column:1/-1;color:var(--ink-3);padding-bottom:5px">'+
       (atWar.length ? 'At war with '+esc(atWar.join(' · ')) : 'At peace')+'</span>'+
+    '<span style="grid-column:1/-1;color:var(--ink-3);padding-bottom:5px">Orders · '+
+      '<b style="color:var(--ink)">DEFEND '+orders.defend+'</b> · '+
+      '<b style="color:var(--ink)">INVADE '+orders.invade+'</b> · '+
+      '<b style="color:var(--ink)">PATROL '+orders.patrol+'</b></span>'+
     '<span>Ground vehicles <b>'+nf.format(Math.round(n.vehicles))+'</b></span>'+
     '<span>Main battle tanks <b>'+nf.format(Math.round(n.tanks))+'</b></span>'+
     '<span>All aircraft <b>'+nf.format(Math.round(n.aircraft))+'</b></span>'+
