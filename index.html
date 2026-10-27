@@ -383,6 +383,8 @@ body.theatre{overflow:hidden}
 #uni g[data-order="defend"] .glyph>*{stroke-width:1.05}
 #uni g[data-order="invade"] .glyph>*{stroke-width:1.65}
 #uni g[data-order="patrol"] .glyph>*{stroke-dasharray:2.2 1.4}
+#uni g.garrison .glyph>*{stroke:#FFE07A;stroke-width:2}
+#uni g.garrison .ring{display:inline;stroke:#FFE07A;opacity:.75;stroke-dasharray:2 1}
 #uni .wake{opacity:.42;stroke-width:.8}
 #uni .qty{display:none;fill:#E9FAFF;stroke:#031018;stroke-width:2.4;paint-order:stroke fill;
   font-family:"IBM Plex Mono",monospace;font-size:6.5px;font-weight:600;letter-spacing:-.04em;
@@ -1267,6 +1269,8 @@ function doctrineLabel(w){
 /* what each arm is worth where the fighting is happening */
 const REL = {land:{ground:1.00, naval:0.12, air:0.78},
              sea: {ground:0.42, naval:1.00, air:0.74}};
+const AFRICA = new Set(('DZA AGO BEN BWA BFA BDI CPV CMR CAF TCD COM COD COG CIV DJI EGY GNQ ERI SWZ ETH GAB GMB GHA GIN GNB KEN LSO LBR LBY MDG MWI MLI MRT MUS MAR MOZ NAM NER NGA RWA STP SEN SYC SLE SOM ZAF SSD SDN TZA TGO TUN UGA ZMB ZWE ESH').split(' '));
+const LATAM = new Set(('MEX BLZ GTM HND SLV NIC CRI PAN CUB HTI DOM JAM TTO BHS BRB COL VEN GUY SUR ECU PER BOL PRY URY ARG BRA CHL').split(' '));
 
 /* ---------- world setup ---------- */
 function powerOf(n){ let s=0; DOMAINS.forEach(d=> s += d.w*(n.p[d.pillar]||0)); return s/100; }
@@ -1287,7 +1291,7 @@ function armPower(n, th){
     s += rel[k] * w[k] * base;
   });
   s *= 0.78 + 0.0048*(n.p.budgetScore||0);
-  return s * garrison(n) * spread(n) + 0.6;
+  return (s * garrison(n) * spread(n) + 0.6) * (n.command||1);
 }
 function combatant(n){
   const g = garrison(n), p = {};
@@ -1310,6 +1314,9 @@ function initWorld(followUp){
     const doc = doctrineFor(c);
     const styles=['Cautious','Opportunist','Aggressive','Naval raider','Capital hunter'];
     const style=styles[(Math.random()*styles.length)|0];
+    const strategies=['Breakthrough','Encirclement','Attrition','Elastic defense','Decapitation'];
+    const strategy=strategies[(Math.random()*strategies.length)|0];
+    const african=AFRICA.has(up), chile=up==='CHL';
     W.nations[up] = {
       code:up, name:c.name, flag:c.flag||'🏳️', rank:c.rank||null,
       atlas0: c.atlas!=null ? c.atlas : (c.eidx||0), est: !!c.est,
@@ -1324,7 +1331,13 @@ function initWorld(followUp){
       terr:new Set([up]), alive:true, taken:[], fronts:0, idle:0, units:[],
       aggr: 0.45 + Math.random()*1.25, style,
       risk:0.65+Math.random()*.9, navalBias:.65+Math.random()*.8,
-      chaos:.55+Math.random()*.9, hue:0, sat:34
+      chaos:.55+Math.random()*.9, strategy,
+      /* Scenario AI, deliberately rerolled every campaign. */
+      command: chile ? 1.18+Math.random()*.08 : african ? .80+Math.random()*.15 : .94+Math.random()*.13,
+      logistics: chile ? 1.18+Math.random()*.10 : african ? .78+Math.random()*.17 : .90+Math.random()*.20,
+      initiative: chile ? 1.20+Math.random()*.10 : african ? .76+Math.random()*.20 : .88+Math.random()*.24,
+      adaptation: chile ? 1.24+Math.random()*.10 : african ? .72+Math.random()*.22 : .86+Math.random()*.28,
+      hue:0, sat:34
     };
     W.owner[up] = up;
   });
@@ -1566,16 +1579,23 @@ function contact(A, B){
   return {th:'sea', e:best?[best]:[]};
 }
 /* Ground changes hands one province at a time, and only where the front is. */
-function capture(A, B, edges, t){
+function capture(A, B, edges, t, th){
   t = t || pickTarget(edges);
   if(!t) return null;
+  const lift=th==='sea'?amphibiousLift(A,t):null;
+  if(th==='sea'&&!lift)return null;
   B.terr.delete(t); A.terr.add(t); W.owner[t] = A.code;
   occupy(t, A.code); paint(t); flash(t);
   /* somebody has to physically walk in; the nearest army takes the ground */
   const c = GD[t] && GD[t].c;
-  if(c){
+  if(c&&lift){
+    const best=lift.army,q=capitalPt(t);
+    lift.ship.carrying=null;
+    best.embarked=false;best.transport=null;best.t=t;best.pendingT=null;
+    if(best.el)best.el.style.display='';place(best,q[0],q[1],true);setCourse(best,q[0],q[1]);
+  } else if(c){
     let best = null, bd = 1e9;
-    A.units.forEach(u=>{ if(u.k!=='army' || u.str<=0.05) return;
+    A.units.forEach(u=>{ if(u.k!=='army' || u.str<=0.05 || u.embarked) return;
       const role = u.ord==='invade' ? 0.62 : u.ord==='patrol' ? 0.88 : 1.35;
       const d = Math.hypot(u.x-c[0], u.y-c[1])*role; if(d<bd){ bd=d; best=u; } });
     if(best){ const q = capitalPt(t); setCourse(best, q[0], q[1], t); }
@@ -1606,7 +1626,7 @@ function absorb(A, B){
   A.docLabel = doctrineLabel(A.doc);
   /* a bigger empire is a different proposition: its kit is now an average of
      two arsenals and its borders are somebody else's borders */
-  A.tech = techOf(A);
+  A.tech = balancedTech(A);
   A.defi = defIndex(A);
 
   B.units.slice().forEach(killUnit);
@@ -1698,11 +1718,31 @@ function techOf(n){
   const x = Math.log(1 + rawTech(n)/TECHM);
   return 0.55 + 1.50*x/(x + 1.0);
 }
+function balancedTech(n){
+  const v=techOf(n);
+  if(n.techScenario!=null)return n.techScenario;
+  if(n.techCap!=null)return Math.min(v,n.techCap);
+  return v;
+}
 function calibrate(){
   const ns = Object.values(W.nations);
   const rt = ns.map(rawTech).sort((a,b)=>a-b);
   TECHM = rt[rt.length>>1] || 1;
   ns.forEach(n=>{ n.tech = techOf(n); });
+  /* Scenario balance, not a real-world ranking: Chile sits just outside the
+     global top five, with the US and Canada kept above it. */
+  const chl=W.nations.CHL;
+  if(chl){
+    const others=ns.filter(n=>n!==chl).sort((a,b)=>b.tech-a.tech);
+    const cutoff=others[4]&&others[4].tech;
+    if(cutoff!=null)['USA','CAN'].forEach(c=>{const n=W.nations[c];if(n)n.tech=Math.max(n.tech,cutoff*1.025);});
+    others.sort((a,b)=>b.tech-a.tech);
+    const hi=others[4]&&others[4].tech, lo=others[5]&&others[5].tech;
+    if(hi!=null) chl.tech=lo!=null?(hi+lo)/2:hi*.99;
+    ns.forEach(n=>{if(n!==chl&&LATAM.has(n.code))n.tech=Math.min(n.tech,chl.tech*.82);});
+    chl.techScenario=chl.tech;
+    ns.forEach(n=>{if(n!==chl&&LATAM.has(n.code))n.techCap=n.tech;});
+  }
 
   /* distance from the world's military centre of gravity, weighted by the
      power sitting at each point — the crossroads score low, the ends of the
@@ -1790,7 +1830,11 @@ function mkUnit(n, k, t, x, y){
   const id = UID++, ord = orderFor(n,k,id);
   const u = {id, k, own:n.code, t, x, y, destX:x, destY:y, pendingT:null,
              str:1, org:1, plan:.15+Math.random()*.25, entrench:0, ord, tgt:null, hunt:null,
-             el:null, glyph:null, heading:0, mark:0, home:t};
+             el:null, glyph:null, heading:0, mark:0, home:t,
+             skill:(.80+Math.random()*.38)*(n.command||1),
+             caution:.35+Math.random()*.55, sense:.75+Math.random()*.50,
+             orbit:Math.random(), transport:null, embarked:false, transportOnly:false,
+             garrisoned:false, stillSince:0};
   const g = document.createElementNS('http://www.w3.org/2000/svg','g');
   g.setAttribute('class','u '+k);
   g.setAttribute('data-u', u.id);
@@ -1820,6 +1864,9 @@ function place(u, x, y, snap){
   if(snap) requestAnimationFrame(()=>{ if(u.el) u.el.style.transition = ''; });
 }
 function setCourse(u,x,y,pendingT){
+  if((u.k==='army'||u.k==='fleet')&&Math.hypot(x-u.x,y-u.y)>.5){
+    u.stillSince=0;u.garrisoned=false;if(u.el)u.el.classList.remove('garrison');
+  }
   u.destX=x; u.destY=y; u.pendingT=pendingT||null;
   faceTarget(u,[x,y]);
 }
@@ -1833,11 +1880,20 @@ function motionLoop(now){
   motionTick++;
   const pace=Math.min(3,Math.sqrt(300/Math.max(18,W.speed)));
   UNITS.forEach(u=>{
+    if(u.embarked){
+      const ship=UNITS.get(u.transport);
+      if(ship){u.x=ship.x;u.y=ship.y;u.t=ship.t;} else recoverEmbarked(u);
+      return;
+    }
     if(u.destX==null||!u.el) return;
-    if(!u._hot&&((motionTick+u.id)&3)) return;   /* background armies update at 1/4 rate */
     const dx=u.destX-u.x,dy=u.destY-u.y,d=Math.hypot(dx,dy); if(d<.08){
+      if(u.ord==='defend'&&(u.k==='army'||u.k==='fleet')){
+        if(!u.stillSince)u.stillSince=now;
+        if(now-u.stillSince>=5000&&!u.garrisoned){u.garrisoned=true;u.el.classList.add('garrison');updateUnitTitle(u,W.nations[u.own]);}
+      }
       if(u.pendingT){u.t=u.pendingT;u.pendingT=null;} return;
     }
+    if(!u._hot&&((motionTick+u.id)&3)) return;   /* background armies update at 1/4 rate */
     const base=u.k==='air'?22:u.k==='fleet'?7.5:u.k==='army'?3.2:0;
     const step=Math.min(d,base*pace*dt*(u._hot?1:4)); if(step<=0)return;
     place(u,u.x+dx/d*step,u.y+dy/d*step);
@@ -1870,7 +1926,17 @@ function rescaleUnits(){
     u.el.setAttribute('transform','translate('+u.x.toFixed(1)+' '+u.y.toFixed(1)+') scale('+ucScale(u)+')');
   });
 }
+function recoverEmbarked(u){
+  const n=W.nations[u.own];
+  const ship=UNITS.get(u.transport);if(ship)ship.carrying=null;
+  u.embarked=false;u.transport=null;
+  if(u.el)u.el.style.display='';
+  if(!n||!n.terr.size)return;
+  const t=nearestOwnedTerr(n,u.x,u.y)||[...n.terr][0],p=terrPt(t,u.id%5);
+  u.t=t;u.pendingT=null;place(u,p[0],p[1],true);setCourse(u,p[0],p[1]);
+}
 function killUnit(u){
+  if(u.k==='fleet') UNITS.forEach(a=>{ if(a.embarked&&a.transport===u.id) recoverEmbarked(a); });
   const n = W.nations[u.own];
   if(n){ const i = n.units.indexOf(u); if(i>=0) n.units.splice(i,1); }
   UNITS.delete(u.id);
@@ -1879,7 +1945,7 @@ function killUnit(u){
 function syncFormationLoads(n){
   const totals = {army:n.vehicles||0,fleet:n.warships||0,air:n.aircraft||0,silo:n.warheads||0};
   for(const kind of Object.keys(totals)){
-    const us = n.units.filter(u=>u.k===kind && u.str>0.02);
+    const us = n.units.filter(u=>u.k===kind && u.str>0.02 && !u.transportOnly);
     const strength = us.reduce((s,u)=>s+u.str,0)||1;
     us.forEach(u=>{
       u.qty = totals[kind]*u.str/strength;
@@ -1892,8 +1958,11 @@ function syncFormationLoads(n){
 function updateUnitTitle(u,n){
   const title = u.el && u.el.querySelector('title'); if(!title) return;
   const prey = u.hunt && UNITS.get(u.hunt), pn = prey && W.nations[prey.own];
-  const action = prey && pn ? 'PATROL — hunting '+pn.name+' '+prey.k : ORDER_NAME[u.ord];
-  title.textContent = n.name+' · '+action+' · ORG '+Math.round(u.org*100)+'% · STR '+Math.round(u.str*100)+'% · '+
+  let action = prey && pn ? 'PATROL — hunting '+pn.name+' '+prey.k : ORDER_NAME[u.ord];
+  if(u.embarked) action='EMBARKED — naval transport';
+  if(u.transportOnly) action='NAVAL TRANSPORT';
+  if(u.garrisoned) action='GARRISONED LAST STAND';
+  title.textContent = n.name+' · '+action+' · SKILL '+Math.round(u.skill*100)+' · ORG '+Math.round(u.org*100)+'% · STR '+Math.round(u.str*100)+'% · '+
     nf.format(Math.round(u.qty||0))+' '+LOAD_LABEL[u.k];
 }
 function compactQty(v){
@@ -1935,6 +2004,24 @@ function offshorePt(t, i){
   const a = i*2.39996, r = 1.8 + 0.82*Math.sqrt(i);
   return [c[0] + Math.cos(a)*r, c[1] + Math.sin(a)*r];
 }
+/* SVG geometry gives patrols the real political/coastal perimeter. Armies are
+   nudged inward onto land; ships are nudged out into territorial water. */
+function perimeterPoint(t,u,side){
+  const p=paths[t], c=GD[t]&&GD[t].c;
+  if(!p||!c||!p.getTotalLength) return side>0?offshore(t):(c||[0,0]);
+  let len=0; try{len=p.getTotalLength();}catch(e){}
+  if(!len) return side>0?offshore(t):c;
+  u.orbit=(u.orbit+.11+.035*(u.sense||1))%1;
+  const q=p.getPointAtLength(len*u.orbit), dx=q.x-c[0],dy=q.y-c[1],d=Math.hypot(dx,dy)||1;
+  const push=side>0?9:-4.5;
+  return [q.x+dx/d*push,q.y+dy/d*push];
+}
+function patrolTerr(n,u,coast){
+  const all=[...n.terr].filter(t=>!coast||(SEA[t]||[]).length);
+  const edge=all.filter(t=>coast||(LAND[t]||[]).some(x=>W.owner[x]!==n.code));
+  const pool=edge.length?edge:all;
+  return pool.length?pool[(u.id+Math.floor(W.turn/4))%pool.length]:u.t;
+}
 
 /* ---------- establishment ----------
    Naval markers use a 10:1 visual scale. Exact inventories remain in state and
@@ -1961,7 +2048,7 @@ function establish(n, initial){
   if(!n.alive || !n.terr.size) return;
   const want = wantUnits(n);
   const have = {army:0, fleet:0, air:0, silo:0};
-  n.units.forEach(u=> have[u.k]++);
+  n.units.forEach(u=>{ if(!u.transportOnly)have[u.k]++; });
   const ts = [...n.terr], cs = coastal(n);
   const coastStack = {};
   n.units.forEach(u=>{ if(u.k==='fleet') coastStack[u.t]=(coastStack[u.t]||0)+1; });
@@ -1985,7 +2072,7 @@ function establish(n, initial){
   /* and stand down what the country can no longer pay for */
   for(const k of ['silo','fleet','air','army']){
     while(have[k] > want[k] + (k==='fleet' ? 0 : 1)){
-      const u = n.units.filter(x=>x.k===k).sort((a,b)=>a.str-b.str)[0];
+      const u = n.units.filter(x=>x.k===k&&!x.transportOnly).sort((a,b)=>a.str-b.str)[0];
       if(!u) break;
       killUnit(u); have[k]--;
     }
@@ -1994,15 +2081,18 @@ function establish(n, initial){
 }
 /* steady reinforcement: losses are made good out of the budget pillar, slowly */
 function reinforce(n){
-  const rate = 0.014 + 0.00042*(n.p.budgetScore||0);
+  const rate = (0.014 + 0.00042*(n.p.budgetScore||0))*(n.logistics||1);
   n.units.forEach(u=>{
     if(u.str < 1) u.str = Math.min(1, u.str + rate*(0.6 + Math.random()*0.8));
     const moving=Math.hypot((u.destX??u.x)-u.x,(u.destY??u.y)-u.y)>.5;
-    u.org=Math.max(0,Math.min(1,(u.org??1)+(moving?-.008:.035)*(0.65+rate*12)));
+    u.org=Math.max(0,Math.min(1,(u.org??1)+(moving?-.008:.035)*(0.65+rate*12)*(n.logistics||1)));
     if(u.ord==='defend'&&!moving) u.entrench=Math.min(1,(u.entrench||0)+.045);
     else u.entrench=Math.max(0,(u.entrench||0)-.08);
     if(u.ord==='invade'&&!moving) u.plan=Math.min(1,(u.plan||0)+.025);
     else if(moving) u.plan=Math.max(0,(u.plan||0)-.012);
+    if(u.ord==='defend'&&!moving&&(u.k==='army'||u.k==='fleet')){
+      u.garrisoned=true;if(u.el)u.el.classList.add('garrison');
+    }
   });
   syncFormationLoads(n);
 }
@@ -2071,42 +2161,78 @@ function strategicObjective(n,foes){
   const t=focus||(enemy.terr.has(code)?code:[...enemy.terr][0]);
   return {enemy,t,p:capitalPt(t)};
 }
+function ensureTransport(n,objective){
+  let ships=n.units.filter(u=>u.k==='fleet'&&u.str>.08);
+  if(ships.length||!objective||!n.units.some(u=>u.k==='army'))return ships;
+  const cs=coastal(n); if(!cs.length)return ships;
+  /* A state with no combat fleet can still build one weak transport flotilla.
+     It carries troops but adds no warships to the displayed inventory. */
+  const t=cs[0],p=offshorePt(t,0),u=mkUnit(n,'fleet',t,p[0],p[1]);
+  u.transportOnly=true;u.ord='invade';u.str=.35;u.org=.55;u.qty=0;
+  updateUnitTitle(u,n);return [u];
+}
+function assignSeaLift(n,objective){
+  if(!objective)return;
+  const ships=ensureTransport(n,objective), used=new Set();
+  n.units.forEach(a=>{if(a.embarked&&a.transport)used.add(a.transport);});
+  n.units.filter(a=>a.k==='army'&&a.ord==='invade'&&!a.embarked&&a.str>.15&&a.org>.18)
+    .sort((a,b)=>b.skill-a.skill).forEach(a=>{
+      const ship=ships.find(s=>!used.has(s.id));if(!ship)return;
+      a.transport=ship.id;a.embarked=true;a.pendingT=null;a.destX=a.x;a.destY=a.y;
+      ship.carrying=a.id;if(a.el)a.el.style.display='none';used.add(ship.id);
+    });
+}
+function amphibiousLift(n,t){
+  const q=offshore(t);
+  for(const a of n.units){
+    if(!a.embarked||!a.transport||a.str<=.05)continue;
+    const ship=UNITS.get(a.transport);
+    if(ship&&ship.str>.05&&Math.hypot(ship.x-q[0],ship.y-q[1])<20)return {army:a,ship};
+  }
+  return null;
+}
 
 function moveForces(n){
   const foes = enemiesOf(n);
   const fr = foes.size ? frontTerr(n, foes) : new Set();
   const objective=strategicObjective(n,foes);
+  const seaMove=!!(objective&&foes.size&&!fr.size);
+  if(seaMove)assignSeaLift(n,objective);
   const stack = {};
   /* Defenders hold ground, invaders march to the front, and patrols sweep
      friendly territory until an enemy enters their search radius. */
   n.units.forEach(u=>{
     if(u.k !== 'army') return;
+    if(u.embarked){updateUnitTitle(u,n);return;}
     u.hunt = null;
-    let dest = u.t;
-    if(!n.terr.has(u.t)){                 /* the ground under it changed hands */
+    let dest = u.t, freePoint=null;
+    if((u.org??1)<.14*u.caution&&n.terr.has(u.home)){
+      const hop=marchStep(n,u.t,new Set([u.home]));if(hop)dest=hop;
+    } else if(!n.terr.has(u.t)){          /* the ground under it changed hands */
       const near = [...n.terr];
       dest = near.length ? near[(Math.random()*near.length)|0] : u.t;
     } else if(u.ord==='invade' && fr.size && !fr.has(u.t)){
       let goals=fr;
-      if(objective){ let bt=null,bd=Infinity;fr.forEach(t=>{const c=GD[t]&&GD[t].c;if(c){const d=Math.hypot(c[0]-objective.p[0],c[1]-objective.p[1]);if(d<bd){bd=d;bt=t;}}});if(bt)goals=new Set([bt]); }
+      if(objective){ let bt=null,bd=Infinity;fr.forEach(t=>{const c=GD[t]&&GD[t].c;if(c){
+        let garrison=0;(LAND[t]||[]).forEach(x=>{if(W.owner[x]===objective.enemy.code)garrison+=defendersIn(objective.enemy,x,'land');});
+        const rem=(TREM[t]||REMM)/REMM;
+        const gw=n.strategy==='Encirclement'?26:n.strategy==='Breakthrough'?22:n.strategy==='Attrition'?10:18;
+        const d=Math.hypot(c[0]-objective.p[0],c[1]-objective.p[1])+gw*garrison/(n.adaptation||1)+3*rem;
+        if(d<bd){bd=d;bt=t;}}});if(bt)goals=new Set([bt]); }
       const hop = marchStep(n, u.t, goals);
       if(hop) dest = hop;
     } else if(u.ord==='patrol'){
-      const prey = nearestEnemyUnit(u,foes,105);
+      const prey = nearestEnemyUnit(u,foes,42*(u.sense||1),'army');
       if(prey){
         u.hunt=prey.id;
         const goal=nearestOwnedTerr(n,prey.x,prey.y);
         if(goal && goal!==u.t){ const hop=marchStep(n,u.t,new Set([goal])); if(hop) dest=hop; }
-      } else if(n.terr.size>1 && Math.random()<0.48){
-        const opts=(LAND[u.t]||[]).filter(x=>W.owner[x]===n.code);
-        if(opts.length) dest=opts[(Math.random()*opts.length)|0];
-      }
-    } else if(u.ord==='invade' && !fr.size && n.terr.size > 1 && Math.random() < 0.22){
-      const opts = (LAND[u.t]||[]).filter(x=> W.owner[x] === n.code);
-      if(opts.length) dest = opts[(Math.random()*opts.length)|0];
+      } else { dest=patrolTerr(n,u,false);freePoint=perimeterPoint(dest,u,-1); }
+    } else if(u.ord==='invade' && !foes.size){
+      dest=patrolTerr(n,u,false);freePoint=perimeterPoint(dest,u,-1);
     }
     const i = (stack[dest] = (stack[dest]||0)) ; stack[dest]++;
-    const p = terrPt(dest, i);
+    const p = freePoint||terrPt(dest, i);
     setCourse(u,p[0],p[1],dest!==u.t?dest:null);
     updateUnitTitle(u,n);
   });
@@ -2121,14 +2247,15 @@ function moveForces(n){
     } else if(u.ord==='invade' && fr.size && !fr.has(u.t) && Math.random()<0.65){
       const pool=[...fr]; if(pool.length) u.t=pool[(Math.random()*pool.length)|0];
     } else if(u.ord==='patrol'){
-      const prey=nearestEnemyUnit(u,foes,Infinity,'air');
+      const prey=nearestEnemyUnit(u,foes,54*(u.sense||1),'air');
       if(prey){ u.hunt=prey.id; freeTarget=[prey.x,prey.y]; }
-      else if(n.terr.size>1 && Math.random()<0.34){ const pool=[...n.terr]; u.t=pool[(Math.random()*pool.length)|0]; }
+      else {u.t=patrolTerr(n,u,false);freeTarget=perimeterPoint(u.t,u,0);}
     }
     const i = 40 + (u.id % 5);
     let p = terrPt(u.t, i);
     if(freeTarget) p=freeTarget;
     else if(u.ord==='invade'&&objective) p=[objective.p[0]+(u.id%5-2)*.08,objective.p[1]+((u.id*3)%5-2)*.08];
+    else if(u.ord==='invade'&&!foes.size) p=perimeterPoint(u.t,u,0);
     setCourse(u,p[0],p[1]);
     updateUnitTitle(u,n);
   });
@@ -2140,11 +2267,12 @@ function moveForces(n){
     if(u.k !== 'fleet') return;
     u.hunt=null;
     let goalT = null, goal=null, gd = 1e9;
-    if(u.ord==='patrol'){
-      const prey=nearestEnemyUnit(u,foes,Infinity,'fleet');
+    if(u.ord==='patrol'&&!u.carrying){
+      const prey=nearestEnemyUnit(u,foes,70*(u.sense||1),'fleet');
       if(prey){ u.hunt=prey.id; goal=[prey.x,prey.y]; }
+      else {goalT=patrolTerr(n,u,true);goal=perimeterPoint(goalT,u,1);}
     }
-    if(!goal && u.ord==='invade' && objective){
+    if(!goal && (u.ord==='invade'||u.transportOnly||u.carrying) && objective){
       if(objective.t&&(SEA[objective.t]||[]).length) goalT=objective.t;
     }
     if(!goal && !goalT && u.ord==='invade' && foes.size){
@@ -2160,6 +2288,7 @@ function moveForces(n){
     if(!goal && !goalT){
       const cs = coastal(n);
       if(u.ord==='defend' && n.terr.has(u.home) && (SEA[u.home]||[]).length) goalT=u.home;
+      else if(u.ord==='invade'&&!foes.size){goalT=patrolTerr(n,u,true);goal=perimeterPoint(goalT,u,1);}
       else goalT = cs[(u.id + (u.ord==='patrol' ? Math.floor(W.turn/8) : 0)) % cs.length];
     }
     if(!goal){
@@ -2254,7 +2383,7 @@ function committedShare(n, kind, committed){
 const MAP_MILES=24901/GEO.w, AIR_INTERCEPT=5/MAP_MILES;
 function unitValue(u,attack){
   const role=attack?(1+.35*(u.plan||0)):(1+.45*(u.entrench||0));
-  return u.str*Math.max(.05,u.org??1)*role;
+  return u.str*Math.max(.05,u.org??1)*role*(u.skill||1);
 }
 function closeAirPairs(a,b){
   const pairs=[],used=new Set();
@@ -2382,7 +2511,7 @@ function revolt(t){
     PILL.forEach(k=> n.p[k] = (n.p0[k]||0) * (0.16 + Math.random()*0.16));
     INVK.forEach(k=> n[k] = (n.inv0[k]||0) * 0.18);
     n.units = []; n.fronts = 0; n.idle = 0;
-    n.tech = techOf(n);
+    n.tech = balancedTech(n);
     n.defi = defIndex(n);
     if(occ){ const i = occ.taken.indexOf(n.code); if(i>=0) occ.taken.splice(i,1); }
   }
@@ -2455,10 +2584,13 @@ function pickTarget(edges){
   edges.forEach(e=>{ score[e.to] = (score[e.to]||0) + 1; });
   return Object.keys(score).sort((x,y)=> score[y]-score[x] || (TBASE[x]?TBASE[x].m:0)-(TBASE[y]?TBASE[y].m:0))[0];
 }
-function defendersIn(n, t){ let s=0; n.units.forEach(u=>{ if(u.k==='army' && u.t===t) s += u.str; }); return s; }
+function defendersIn(n, t, th){ let s=0; n.units.forEach(u=>{
+  if(u.k==='army'&&u.t===t)s+=u.str*(u.garrisoned?1.55:1);
+  if(th==='sea'&&u.k==='fleet'&&u.t===t&&u.ord==='defend')s+=u.str*(u.garrisoned?1.55:1);
+});return s; }
 /* an assault that has not broken through is not nothing: it eats the garrison */
-function grind(n, t, amt){
-  const list = n.units.filter(u=>u.k==='army' && u.t===t);
+function grind(n, t, amt, th){
+  const list = n.units.filter(u=>(u.k==='army'||(th==='sea'&&u.k==='fleet'&&u.ord==='defend'))&&u.t===t);
   if(!list.length) return;
   let left = amt;
   for(const u of list){
@@ -2609,6 +2741,7 @@ function engage(k){
   if(mr > 6)         mt += 0.85*Math.log(mr/6);
   else if(mr < 1/6)  mt -= 0.85*Math.log(1/(6*mr));
   let z = WT*Math.log((A.tech||1)/(B.tech||1)) + mt;
+  z += 1.35*Math.log((A.command||1)/(B.command||1));
 
   /* doctrine: how well each side's way of fighting suits this theatre */
   const qa = armPower(A, th), qb = armPower(B, th);
@@ -2682,18 +2815,24 @@ function engage(k){
     const X = fwd ? A : B, Y = fwd ? B : A;
     const edges = (fwd ? ca : cb).e;
       const target = w.focus&&edges.some(e=>e.to===w.focus) ? w.focus : pickTarget(edges);
-    const held = target ? defendersIn(Y, target) : 0;
+    const held = target ? defendersIn(Y, target, th) : 0;
     if(held > 0.05){
       /* the line is broken but the garrison is not. The assault stalls on top
          of it and spends the month killing what is in the way. */
       w.p = (fwd?1:-1)*(need - 0.03);
-      grind(Y, target, 0.09 + 0.15*Math.random());
+      grind(Y, target, 0.09 + 0.15*Math.random(), th);
       if(target) flash(target);
       if(watched(X,Y) && Math.random()<0.30)
         say('me','   '+X.flag+' '+X.name+' is held at '+((GD[target]&&GD[target].n)||target)+
             ' \u2014 the garrison has not broken.');
     } else {
-      const t = capture(X, Y, edges, target);
+      if(th==='sea'&&target&&!amphibiousLift(X,target)){
+        w.p=(fwd?1:-1)*(need-.03);
+        if(watched(X,Y)&&W.turn%8===0)
+          say('me','   '+X.flag+' '+X.name+' awaits a naval transport off '+((GD[target]&&GD[target].n)||target)+'.');
+        return;
+      }
+      const t = capture(X, Y, edges, target, th);
       /* ground changes hands and is immediately contested again: the defender
          counterattacks onto what it just lost */
       w.p = fwd ? -0.18 : 0.18;
@@ -2780,12 +2919,16 @@ function declare(n){
     if(n.style==='Cautious') s*=.88;
     if(n.style==='Naval raider'&&th==='sea') s*=1.35*n.navalBias;
     if(n.style==='Capital hunter'&&o.terr.size<=2) s*=1.22;
+    if(n.strategy==='Encirclement'&&o.fronts>0)s*=1.24;
+    if(n.strategy==='Decapitation'&&o.terr.size<=2)s*=1.18;
+    if(n.strategy==='Elastic defense'&&n.fronts>0)s*=.78;
+    s*=.78+.22*(n.initiative||1);
     s *= n.risk*(0.62 + Math.random()*.76*n.chaos);
     if(s > bs){ bs = s; best = {o, th}; }
   });
   if(!best) return false;
   /* the longer a state has sat still, the less it needs to like the odds */
-  const bar = (best.th==='sea' ? 1.18 : 0.88) - Math.min(0.30, n.idle*0.0022);
+  const bar = ((best.th==='sea' ? 1.18 : 0.88) - Math.min(0.30, n.idle*0.0022))/(.85+.15*(n.adaptation||1));
   if(bs < bar) return false;
   openWar(n, best.o, best.th);
   return true;
@@ -2963,9 +3106,13 @@ function renderFocus(){
             }).filter(Boolean);
   const orders={defend:0,invade:0,patrol:0};
   n.units.forEach(u=>{ if(orders[u.ord]!=null) orders[u.ord]++; });
+  const techRank=Object.values(W.nations).filter(x=>x.alive).sort((a,b)=>(b.tech||0)-(a.tech||0)).indexOf(n)+1;
   document.getElementById('fStat').innerHTML =
     '<span style="grid-column:1/-1;color:var(--ink-3);padding-bottom:3px"><b style="color:var(--ink)">'+esc(n.docLabel)+
-      '</b> · '+esc(n.style)+' AI · index '+powerOf(n).toFixed(0)+', at the front '+fieldPower(n).toFixed(0)+'</span>'+
+      '</b> · '+esc(n.style)+' AI · '+esc(n.strategy)+' strategy · index '+powerOf(n).toFixed(0)+', at the front '+fieldPower(n).toFixed(0)+'</span>'+
+    '<span style="grid-column:1/-1;color:var(--ink-3);padding-bottom:5px">Technology <b style="color:var(--ink)">#'+techRank+
+      '</b> · command '+Math.round(n.command*100)+' · logistics '+Math.round(n.logistics*100)+
+      ' · initiative '+Math.round(n.initiative*100)+'</span>'+
     '<span style="grid-column:1/-1;color:var(--ink-3);padding-bottom:5px">'+
       (atWar.length ? 'At war with '+esc(atWar.join(' · ')) : 'At peace')+'</span>'+
     '<span style="grid-column:1/-1;color:var(--ink-3);padding-bottom:5px">Orders · '+
