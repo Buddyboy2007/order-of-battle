@@ -358,22 +358,30 @@ body.theatre{overflow:hidden}
 #land{filter:drop-shadow(0 0 2.5px rgba(79,210,240,.30))}
 .stage.fast #land{filter:none}
 
+#fronts .claim{stroke:none;pointer-events:none;transition:opacity .4s linear}
+#fronts .axis{fill:none;stroke:#F2B23C;stroke-width:1.15;stroke-dasharray:5 3;
+  vector-effect:non-scaling-stroke;opacity:.62;pointer-events:none}
+#fronts .axis.sea{stroke:#8FE3F5;stroke-dasharray:2 4}
+#fronts .line{fill:none;stroke:#FFE07A;stroke-width:2.2;vector-effect:non-scaling-stroke;pointer-events:none}
+#fronts .progress{fill:#FFE07A;stroke:#031018;stroke-width:1.2;vector-effect:non-scaling-stroke;pointer-events:none}
+
 #blasts circle{fill:none;stroke:var(--d-red);stroke-width:1.6;vector-effect:non-scaling-stroke}
 #blasts circle.fo{stroke:#FFD36A}
 
 /* ---------- units on the plot ---------- */
-#uni g{transition:transform .55s linear}
-#uni.snap g{transition:none}
-.stage.fast #uni g{transition:none}
+#uni>.u{transition:transform .55s linear}
+#uni .glyph{transition:transform .35s ease-out;transform-box:fill-box;transform-origin:center}
+#uni.snap>.u,.stage.fast #uni>.u{transition:none}
 #uni path,#uni circle,#uni line,#uni rect{vector-effect:non-scaling-stroke;fill:none;stroke-width:1.25}
 #uni .ring{display:none;stroke-width:.8;opacity:.30}
 #uni.near .ring,#uni g.mine .ring{display:inline}
 #uni .wk{opacity:.30}
 #uni g.mine{opacity:1}
 #uni .hit path,#uni .hit circle,#uni .hit rect{stroke:#FFE07A;stroke-width:2}
-#uni g[data-order="defend"]>path,#uni g[data-order="defend"]>circle,#uni g[data-order="defend"]>rect{stroke-width:1.05}
-#uni g[data-order="invade"]>path,#uni g[data-order="invade"]>circle,#uni g[data-order="invade"]>rect{stroke-width:1.65}
-#uni g[data-order="patrol"]>path,#uni g[data-order="patrol"]>circle,#uni g[data-order="patrol"]>rect{stroke-dasharray:2.2 1.4}
+#uni g[data-order="defend"] .glyph>*{stroke-width:1.05}
+#uni g[data-order="invade"] .glyph>*{stroke-width:1.65}
+#uni g[data-order="patrol"] .glyph>*{stroke-dasharray:2.2 1.4}
+#uni .wake{opacity:.42;stroke-width:.8}
 #uni .qty{display:none;fill:#E9FAFF;stroke:#031018;stroke-width:2.4;paint-order:stroke fill;
   font-family:"IBM Plex Mono",monospace;font-size:6.5px;font-weight:600;letter-spacing:-.04em;
   pointer-events:none;dominant-baseline:middle}
@@ -383,6 +391,7 @@ body.theatre{overflow:hidden}
 #shots path.icbm{stroke:#FF6A52;stroke-width:1.6}
 #shots path.sortie{stroke:#8FE3F5}
 #shots path.gun{stroke:#F2B23C}
+#shots path.naval{stroke:#63C7FF;stroke-width:1.45;stroke-dasharray:4 2}
 #shots circle{fill:#FFE07A;stroke:none}
 
 /* floating panels */
@@ -578,7 +587,7 @@ body.theatre{overflow:hidden}
   </section>
 
   <footer>
-    <p><strong>About the numbers.</strong> Every figure on the cards and on the map — personnel, ground vehicles, tanks, naval vessels, aircraft, warheads, budget, and the six ATLAS pillar scores — is taken from GlobalMilitary.net's 2026 ATLAS and branch inventory tables, updated between 18 and 27 October 2026. On the situation map, <strong>one ship symbol is one naval vessel</strong>; ground and air hardware is grouped into readable formations whose printed labels show how many real vehicles or aircraft they represent. Those inventory counts determine the mass committed to each front and the equipment lost there; the branch scores continue to represent quality, composition and availability. The engagement simulation remains a <em>game mechanic</em> with deliberate randomness, not a forecast. Real conflicts turn on terrain, alliances, logistics, intelligence and political will that no index captures. The world map uses Natural Earth 110m boundaries on an Equal Earth projection; adjacency is derived from those boundaries, with sea crossings measured as real distances and gated on fleet strength. Unranked sovereign states use public order-of-magnitude estimates and are labelled <em>est.</em> wherever they appear. Borders, alliances and the idea that nations simply absorb one another are the game\u2019s, not the world\u2019s.</p>
+    <p><strong>About the numbers.</strong> Every figure on the cards and on the map — personnel, ground vehicles, tanks, naval vessels, aircraft, warheads, budget, and the six ATLAS pillar scores — is taken from GlobalMilitary.net's 2026 ATLAS and branch inventory tables, updated between 18 and 27 October 2026. On the situation map, <strong>one ship symbol represents up to ten naval vessels</strong>; the inventory panel still reports the exact real total. Ground and air hardware is likewise grouped into readable formations whose printed labels show how many real vehicles or aircraft they represent. Those inventory counts determine the mass committed to each front and the equipment lost there; the branch scores continue to represent quality, composition and availability. The engagement simulation remains a <em>game mechanic</em> with deliberate randomness, not a forecast. Real conflicts turn on terrain, alliances, logistics, intelligence and political will that no index captures. The world map uses Natural Earth 110m boundaries on an Equal Earth projection; adjacency is derived from those boundaries, with sea crossings measured as real distances and gated on fleet strength. Unranked sovereign states use public order-of-magnitude estimates and are labelled <em>est.</em> wherever they appear. Borders, alliances and the idea that nations simply absorb one another are the game\u2019s, not the world\u2019s.</p>
   </footer>
 </div>
 
@@ -627,6 +636,7 @@ body.theatre{overflow:hidden}
       <g id="mroot">
         <g id="grat"></g>
         <g id="land"></g>
+        <g id="fronts"></g>
         <g id="blasts"></g>
         <g id="shots"></g>
         <g id="uni"></g>
@@ -1289,6 +1299,7 @@ function initWorld(followUp){
   W.wars = {}; W.truce = {}; W.nwar = 0; W.resist = {}; W.defcon = 5;
   UNITS.forEach(u=>{ if(u.el) u.el.remove(); }); UNITS.clear();
   if(gUni) gUni.innerHTML = '';
+  if(gFront) gFront.innerHTML = '';
   WDATA.forEach(c=>{
     const up = c.code.toUpperCase();
     if(!GD[up]) return;
@@ -1336,6 +1347,7 @@ function initWorld(followUp){
 /* ---------- map ---------- */
 const svgMap = document.getElementById('map');
 const gLand  = document.getElementById('land');
+const gFront = document.getElementById('fronts');
 const gBlast = document.getElementById('blasts');
 const tipEl  = document.getElementById('tip');
 const paths  = {};
@@ -1390,6 +1402,27 @@ function paint(t){
   p.classList.toggle('foc', o === W.follow);
 }
 function paintAll(){ GORDER.forEach(paint); }
+/* HOI-style operational overlay: the dashed axis is the battle plan, the solid
+   segment is ground already fought over, and the translucent wash grows across
+   the territory for months before ownership actually changes. */
+function renderFronts(){
+  if(!gFront) return;
+  let out='';
+  Object.values(W.wars).forEach(w=>{
+    const A=W.nations[w.x], B=W.nations[w.y]; if(!A||!B||!A.alive||!B.alive) return;
+    const fwd=w.p>=0, X=fwd?A:B, Y=fwd?B:A;
+    const c=contact(X,Y), e=c.e[0]; if(!e) return;
+    const a=GD[e.from]&&GD[e.from].c, b=GD[e.to]&&GD[e.to].c; if(!a||!b) return;
+    const need=Y.terr.size<=1?1.85:1, pressure=Math.min(1,Math.abs(w.p)/need);
+    const frac=.08+.84*pressure, px=a[0]+(b[0]-a[0])*frac, py=a[1]+(b[1]-a[1])*frac;
+    if(GD[e.to]&&pressure>.02)
+      out+='<path class="claim" d="'+GD[e.to].d+'" fill="'+strokeOf(X)+'" opacity="'+(.035+.19*pressure).toFixed(3)+'"></path>';
+    out+='<path class="axis '+(c.th==='sea'?'sea':'')+'" d="M'+a[0].toFixed(1)+' '+a[1].toFixed(1)+'L'+b[0].toFixed(1)+' '+b[1].toFixed(1)+'"></path>'+
+         '<path class="line" d="M'+a[0].toFixed(1)+' '+a[1].toFixed(1)+'L'+px.toFixed(1)+' '+py.toFixed(1)+'"></path>'+
+         '<circle class="progress" cx="'+px.toFixed(1)+'" cy="'+py.toFixed(1)+'" r="2.8"></circle>';
+  });
+  gFront.innerHTML=out;
+}
 
 function applyView(){ document.getElementById('mroot').setAttribute('transform','translate('+V.x+' '+V.y+') scale('+V.k+')'); rescaleUnits(); lod(); }
 function fitTo(codes){
@@ -1712,9 +1745,11 @@ let UID = 1;
 const GLYPH = {
   army : '<rect x="-5.4" y="-3.4" width="10.8" height="6.8"></rect>'+
          '<path d="M-5.4 -3.4L5.4 3.4M5.4 -3.4L-5.4 3.4"></path>',
-  fleet: '<path d="M-6.2 -0.8L6.2 -0.8L4.2 3.4L-4.2 3.4Z"></path>'+
-         '<path d="M0 -0.8L0 -4.6M-2.6 -3.2L2.6 -3.2"></path>',
-  air  : '<path d="M0 -5.2L3.8 3.6L0 1.5L-3.8 3.6Z"></path>',
+  fleet: '<path d="M-7 1.8L-5.2 -1.5L3.8 -1.5L7.2 .2L4.6 3.2L-4.8 3.2Z"></path>'+
+         '<path d="M-2.8 -1.5L-1.2 -4.2L2.1 -4.2L3.4 -1.5M.2 -4.2V-6M-1.5 -5.2H2"></path>'+
+         '<path class="wake" d="M-8.5 0H-12M-8 2.3H-11"></path>',
+  air  : '<path d="M0 -7L1.4 -2.2L6 1L5.8 2.2L1.2 .8L1 4.8L3 6.2L2.8 7L0 6L-2.8 7L-3 6.2L-1 4.8L-1.2 .8L-5.8 2.2L-6 1L-1.4 -2.2Z"></path>'+
+         '<path d="M0 -5.8V5.5"></path>',
   silo : '<circle r="4.3"></circle><path d="M0 -4.3L0 4.3"></path>'
 };
 const URING = {fleet:16, silo:0, air:0, army:0};
@@ -1735,16 +1770,17 @@ function orderFor(n, k, id){
 function mkUnit(n, k, t, x, y){
   const id = UID++, ord = orderFor(n,k,id);
   const u = {id, k, own:n.code, t, x, y, str:1, ord, tgt:null, hunt:null,
-             el:null, mark:0, home:t};
+             el:null, glyph:null, heading:0, mark:0, home:t};
   const g = document.createElementNS('http://www.w3.org/2000/svg','g');
   g.setAttribute('class','u '+k);
   g.setAttribute('data-u', u.id);
   g.setAttribute('data-order', ord);
-  g.innerHTML = '<title></title>'+(URING[k] ? '<circle class="ring" r="'+URING[k]+'"></circle>' : '') + GLYPH[k] +
+  g.innerHTML = '<title></title>'+(URING[k] ? '<circle class="ring" r="'+URING[k]+'"></circle>' : '') +
+    '<g class="glyph">'+GLYPH[k]+'</g>' +
     (k==='fleet' ? '' : '<text class="qty" x="7" y="0"></text>');
   g.style.stroke = strokeOf(n);
   gUni.appendChild(g);
-  u.el = g;
+  u.el = g; u.glyph = g.querySelector('.glyph');
   place(u, x, y, true);
   n.units.push(u);
   UNITS.set(u.id, u);
@@ -1753,6 +1789,11 @@ function mkUnit(n, k, t, x, y){
 const UNITS = new Map();
 
 function place(u, x, y, snap){
+  const dx=x-u.x, dy=y-u.y;
+  if(!snap && (u.k==='air'||u.k==='fleet') && Math.hypot(dx,dy)>.35){
+    u.heading=Math.atan2(dy,dx)*180/Math.PI + (u.k==='air'?90:0);
+    if(u.glyph) u.glyph.setAttribute('transform','rotate('+u.heading.toFixed(1)+')');
+  }
   u.x = x; u.y = y;
   if(snap) u.el.style.transition = 'none';
   u.el.setAttribute('transform','translate('+x.toFixed(1)+' '+y.toFixed(1)+') scale('+ucScale(u)+')');
@@ -1806,7 +1847,8 @@ function updateUnitTitle(u,n){
   const title = u.el && u.el.querySelector('title'); if(!title) return;
   const prey = u.hunt && UNITS.get(u.hunt), pn = prey && W.nations[prey.own];
   const action = prey && pn ? 'PATROL — hunting '+pn.name+' '+prey.k : ORDER_NAME[u.ord];
-  title.textContent = n.name+' · '+action+' · '+nf.format(Math.round(u.qty||0))+' '+LOAD_LABEL[u.k];
+  title.textContent = n.name+' · '+action+' · ORG '+Math.round(u.str*100)+'% · '+
+    nf.format(Math.round(u.qty||0))+' '+LOAD_LABEL[u.k];
 }
 function compactQty(v){
   const q = Math.max(0, Math.round(v));
@@ -1839,8 +1881,8 @@ function offshore(t){
   const l = Math.hypot(dx,dy) || 1;
   return OFFP[t] = [c[0] + dx/l*26, c[1] + dy/l*26];
 }
-/* Every vessel is its own marker. Fan ships around their coast instead of
-   stacking dozens of identical symbols at one coordinate. */
+/* Fleet markers are groups of up to ten vessels. Fan them around their coast
+   instead of stacking identical symbols at one coordinate. */
 function offshorePt(t, i){
   const c = offshore(t);
   if(!i) return [c[0],c[1]];
@@ -1849,8 +1891,8 @@ function offshorePt(t, i){
 }
 
 /* ---------- establishment ----------
-   Naval markers are literal vessel counts. The far larger ground and air
-   inventories use labelled formations so their exact contents remain legible. */
+   Naval markers use a 10:1 visual scale. Exact inventories remain in state and
+   in the HUD; ground and air likewise use grouped, labelled formations. */
 function wantUnits(n){
   const nu = n.p.nuclear||0;
   /* Conquest raises more formations; inherited islands do not. Scale off how
@@ -1859,7 +1901,7 @@ function wantUnits(n){
   const sc = 1 + 0.75*Math.log2(Math.max(1, n.terr.size / Math.max(1, n.t0||1)));
   return {
     army : Math.max(1, Math.min(36, Math.ceil(Math.sqrt(Math.max(1,n.vehicles||0))/4) * Math.min(2,sc))),
-    fleet: Math.max(0, Math.round(n.warships||0)),
+    fleet: Math.max(0, Math.ceil((n.warships||0)/10)),
     air  : Math.max((n.aircraft||0)>0?1:0, Math.min(30, Math.ceil(Math.sqrt(Math.max(0,n.aircraft||0))/3) * Math.min(2,sc))),
     silo : Math.min(6,  Math.round(Math.pow(nu/100, 0.80) * 4))
   };
@@ -1896,7 +1938,7 @@ function establish(n, initial){
   }
   /* and stand down what the country can no longer pay for */
   for(const k of ['silo','fleet','air','army']){
-    while(have[k] > want[k] + 1){
+    while(have[k] > want[k] + (k==='fleet' ? 0 : 1)){
       const u = n.units.filter(x=>x.k===k).sort((a,b)=>a.str-b.str)[0];
       if(!u) break;
       killUnit(u); have[k]--;
@@ -2165,9 +2207,8 @@ function commit(n, from, to, th){
   });
   const gShare = committedShare(n,'army',gm), aShare = committedShare(n,'air',am),
         fShare = committedShare(n,'fleet',fm);
-  /* A marker is a formation, not one imaginary ship. If Chile commits every
-     fleet marker, all 75 current vessels are represented; half the markers
-     commit roughly half the fleet. */
+  /* A fleet marker represents up to ten vessels. Committing every marker still
+     commits the exact inventory; half the markers commits roughly half. */
   const gMass = branchInventory(n,'ground') * Math.sqrt(gShare);
   const aMass = branchInventory(n,'air') * Math.sqrt(aShare);
   const fMass = branchInventory(n,'naval') * Math.sqrt(fShare);
@@ -2198,13 +2239,26 @@ function bleed(c, amount){
     }
   }
 }
-/* the visible exchange: sorties, bombardment, gun lines */
-function depict(c, to, bow){
+function faceTarget(u,p){
+  if(!u.glyph||!p||(u.k!=='air'&&u.k!=='fleet')) return;
+  u.heading=Math.atan2(p[1]-u.y,p[0]-u.x)*180/Math.PI+(u.k==='air'?90:0);
+  u.glyph.setAttribute('transform','rotate('+u.heading.toFixed(1)+')');
+}
+/* Aircraft now attack hostile wings and ships before striking territory; fleets
+   maneuver against opposing task forces before bombarding the coast. */
+function depict(c, enemy, to, bow){
   const tgt = [...to];
   if(!tgt.length) return;
   const pick = ()=>{ const t = tgt[(Math.random()*tgt.length)|0]; return (GD[t]&&GD[t].c)||null; };
-  c.a.forEach(u=>{ if(Math.random()<0.70){ const p=pick(); if(p) fire([u.x,u.y], p, 'sortie', 900, bow*1.4); } });
-  c.f.forEach(u=>{ if(Math.random()<0.65){ const p=pick(); if(p){ fire([u.x,u.y], p, 'gun', 620, bow*0.3); spark(p); } } });
+  const hostileAir=(enemy.a||[]).concat(enemy.f||[]), hostileFleet=enemy.f||[];
+  c.a.forEach(u=>{ if(Math.random()<0.70){
+    const v=hostileAir.length?hostileAir[(Math.random()*hostileAir.length)|0]:null, p=v?[v.x,v.y]:pick();
+    if(p){ faceTarget(u,p); fire([u.x,u.y],p,'sortie',900,bow*1.4); if(v&&Math.random()<.3)spark(p); }
+  } });
+  c.f.forEach(u=>{ if(Math.random()<0.65){
+    const v=hostileFleet.length?hostileFleet[(Math.random()*hostileFleet.length)|0]:null, p=v?[v.x,v.y]:pick();
+    if(p){ faceTarget(u,p); fire([u.x,u.y],p,v?'naval':'gun',v?760:620,bow*.3); spark(p); }
+  } });
   c.g.slice(0,4).forEach(u=>{ if(Math.random()<0.45){ const p=pick(); if(p) fire([u.x,u.y], p, 'gun', 480, bow*0.2); } });
 }
 
@@ -2494,8 +2548,8 @@ function engage(k){
   if(watched(A,B) || W.shots > 0){
     const keep = W.shots;
     if(watched(A,B)) W.shots = Math.max(W.shots, 14);
-    depict(CA, aimA,  0.17);
-    depict(CB, aimB, -0.17);
+    depict(CA, CB, aimA,  0.17);
+    depict(CB, CA, aimB, -0.17);
     if(watched(A,B)) W.shots = Math.min(W.shots, keep);
   }
 
@@ -2726,6 +2780,7 @@ function runTurn(){
   /* occupied ground does not stay quiet, and sometimes it comes back */
   resistTick();
   lod();
+  renderFronts();
 
   const alive = Object.values(W.nations).filter(n=>n.alive);
   W.nwar = Object.keys(W.wars).length;
@@ -2793,7 +2848,9 @@ function renderFocus(){
   const atWar = Object.values(W.wars).filter(w=> w.x===n.code || w.y===n.code)
     .map(w=>{ const o = W.nations[w.x===n.code ? w.y : w.x]; if(!o) return null;
               const mine = (w.x===n.code ? w.p : -w.p);
-              return o.flag+' '+o.name+' '+(mine>0.25?'↑':mine<-0.25?'↓':'=');
+              const need=(mine>=0?o:n).terr.size<=1?1.85:1;
+              const pct=Math.min(99,Math.round(Math.abs(mine)/need*100));
+              return o.flag+' '+o.name+' '+(mine>0.25?'↑':mine<-0.25?'↓':'=')+' '+pct+'%';
             }).filter(Boolean);
   const orders={defend:0,invade:0,patrol:0};
   n.units.forEach(u=>{ if(orders[u.ord]!=null) orders[u.ord]++; });
@@ -2847,6 +2904,7 @@ let builtMap = false;
 function startWorld(code){
   initWorld(code);
   if(!builtMap){ buildMap(); builtMap = true; } else paintAll();
+  renderFronts();
   resetView();
   wlog.innerHTML = '';
   const me = W.nations[W.follow];
