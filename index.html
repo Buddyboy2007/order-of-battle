@@ -369,7 +369,7 @@ body.theatre{overflow:hidden}
 #blasts circle.fo{stroke:#FFD36A}
 
 /* ---------- units on the plot ---------- */
-#uni>.u{transition:transform .55s linear}
+#uni>.u{transition:none}
 #uni .glyph{transition:transform .35s ease-out;transform-box:fill-box;transform-origin:center}
 #uni.snap>.u,.stage.fast #uni>.u{transition:none}
 #uni path,#uni circle,#uni line,#uni rect{vector-effect:non-scaling-stroke;fill:none;stroke-width:1.25}
@@ -1304,6 +1304,8 @@ function initWorld(followUp){
     const up = c.code.toUpperCase();
     if(!GD[up]) return;
     const doc = doctrineFor(c);
+    const styles=['Cautious','Opportunist','Aggressive','Naval raider','Capital hunter'];
+    const style=styles[(Math.random()*styles.length)|0];
     W.nations[up] = {
       code:up, name:c.name, flag:c.flag||'🏳️', rank:c.rank||null,
       atlas0: c.atlas!=null ? c.atlas : (c.eidx||0), est: !!c.est,
@@ -1316,7 +1318,9 @@ function initWorld(followUp){
       warheads:c.warheads||0, budget:c.budget||0,
       doc:doc, docLabel:doctrineLabel(doc),
       terr:new Set([up]), alive:true, taken:[], fronts:0, idle:0, units:[],
-      aggr: 0.55 + Math.random()*1.05, hue:0, sat:34
+      aggr: 0.45 + Math.random()*1.25, style,
+      risk:0.65+Math.random()*.9, navalBias:.65+Math.random()*.8,
+      chaos:.55+Math.random()*.9, hue:0, sat:34
     };
     W.owner[up] = up;
   });
@@ -1365,6 +1369,13 @@ function eeProject(lon, lat){
   const y = th*(EE.A1 + EE.A2*t2 + t6*(EE.A3 + EE.A4*t2));
   return [(x - EE.X0)*EE.SC, (EE.Y1 - y)*EE.SC + EE.DY];
 }
+/* True city objectives where they matter to the requested opening campaigns;
+   every other state falls back to its mapped national centre. */
+const CAPITAL_LL={CHL:[-70.67,-33.45],BOL:[-65.26,-19.04],ARG:[-58.38,-34.60],
+  FLK:[-57.85,-51.69],GBR:[-0.13,51.51]};
+const CAPITAL={};
+Object.keys(CAPITAL_LL).forEach(k=>CAPITAL[k]=eeProject(CAPITAL_LL[k][0],CAPITAL_LL[k][1]));
+function capitalPt(t){ return CAPITAL[t]||(GD[t]&&GD[t].c)||[0,0]; }
 function buildGraticule(){
   const g = document.getElementById('grat'); if(!g) return;
   const out = [];
@@ -1410,6 +1421,7 @@ function renderFronts(){
   let out='';
   Object.values(W.wars).forEach(w=>{
     const A=W.nations[w.x], B=W.nations[w.y]; if(!A||!B||!A.alive||!B.alive) return;
+    if(!watched(A,B)) return; /* full SVG country copies are expensive; draw the followed theatre */
     const fwd=w.p>=0, X=fwd?A:B, Y=fwd?B:A;
     const c=contact(X,Y), e=c.e[0]; if(!e) return;
     const a=GD[e.from]&&GD[e.from].c, b=GD[e.to]&&GD[e.to].c; if(!a||!b) return;
@@ -1559,7 +1571,7 @@ function capture(A, B, edges, t){
     A.units.forEach(u=>{ if(u.k!=='army' || u.str<=0.05) return;
       const role = u.ord==='invade' ? 0.62 : u.ord==='patrol' ? 0.88 : 1.35;
       const d = Math.hypot(u.x-c[0], u.y-c[1])*role; if(d<bd){ bd=d; best=u; } });
-    if(best){ best.t = t; const q = terrPt(t, 0); place(best, q[0], q[1]); }
+    if(best){ const q = capitalPt(t); setCourse(best, q[0], q[1], t); }
   }
   return t;
 }
@@ -1769,7 +1781,7 @@ function orderFor(n, k, id){
 
 function mkUnit(n, k, t, x, y){
   const id = UID++, ord = orderFor(n,k,id);
-  const u = {id, k, own:n.code, t, x, y, str:1, ord, tgt:null, hunt:null,
+  const u = {id, k, own:n.code, t, x, y, destX:x, destY:y, pendingT:null, str:1, ord, tgt:null, hunt:null,
              el:null, glyph:null, heading:0, mark:0, home:t};
   const g = document.createElementNS('http://www.w3.org/2000/svg','g');
   g.setAttribute('class','u '+k);
@@ -1799,6 +1811,32 @@ function place(u, x, y, snap){
   u.el.setAttribute('transform','translate('+x.toFixed(1)+' '+y.toFixed(1)+') scale('+ucScale(u)+')');
   if(snap) requestAnimationFrame(()=>{ if(u.el) u.el.style.transition = ''; });
 }
+function setCourse(u,x,y,pendingT){
+  u.destX=x; u.destY=y; u.pendingT=pendingT||null;
+  faceTarget(u,[x,y]);
+}
+let motionLast=0, motionFrame=0, motionTick=0;
+function motionLoop(now){
+  requestAnimationFrame(motionLoop);
+  if(!motionLast){ motionLast=now; return; }
+  if(now-motionFrame<40) return;                 /* 25 fps cap keeps the world map light */
+  const dt=Math.min(.08,(now-motionLast)/1000); motionLast=now; motionFrame=now;
+  if(!W.playing||W.over) return;
+  motionTick++;
+  const pace=Math.min(3,Math.sqrt(300/Math.max(18,W.speed)));
+  UNITS.forEach(u=>{
+    if(u.destX==null||!u.el) return;
+    if(!u._hot&&((motionTick+u.id)&3)) return;   /* background armies update at 1/4 rate */
+    const dx=u.destX-u.x,dy=u.destY-u.y,d=Math.hypot(dx,dy); if(d<.08){
+      if(u.pendingT){u.t=u.pendingT;u.pendingT=null;} return;
+    }
+    const base=u.k==='air'?22:u.k==='fleet'?7.5:u.k==='army'?3.2:0;
+    const step=Math.min(d,base*pace*dt*(u._hot?1:4)); if(step<=0)return;
+    place(u,u.x+dx/d*step,u.y+dy/d*step);
+    if(step===d&&u.pendingT){u.t=u.pendingT;u.pendingT=null;}
+  });
+}
+requestAnimationFrame(motionLoop);
 function ucScale(u){
   return ((0.46 + 0.36*Math.max(0.15, Math.min(1, u.str))) / Math.max(0.6, Math.pow(V.k, 0.72))).toFixed(3);
 }
@@ -2011,10 +2049,19 @@ function nearestEnemyUnit(u, foes, radius){
   });
   return best;
 }
+function strategicObjective(n,foes){
+  let code=n.goal;
+  if(!code||!foes.has(code)||!W.nations[code]||!W.nations[code].alive) code=[...foes][0];
+  const enemy=code&&W.nations[code]; if(!enemy)return null;
+  const w=W.wars[warKey(n.code,code)], focus=w&&w.focus&&W.owner[w.focus]===code?w.focus:null;
+  const t=focus||(enemy.terr.has(code)?code:[...enemy.terr][0]);
+  return {enemy,t,p:capitalPt(t)};
+}
 
 function moveForces(n){
   const foes = enemiesOf(n);
   const fr = foes.size ? frontTerr(n, foes) : new Set();
+  const objective=strategicObjective(n,foes);
   const stack = {};
   /* Defenders hold ground, invaders march to the front, and patrols sweep
      friendly territory until an enemy enters their search radius. */
@@ -2026,7 +2073,9 @@ function moveForces(n){
       const near = [...n.terr];
       dest = near.length ? near[(Math.random()*near.length)|0] : u.t;
     } else if(u.ord==='invade' && fr.size && !fr.has(u.t)){
-      const hop = marchStep(n, u.t, fr);
+      let goals=fr;
+      if(objective){ let bt=null,bd=Infinity;fr.forEach(t=>{const c=GD[t]&&GD[t].c;if(c){const d=Math.hypot(c[0]-objective.p[0],c[1]-objective.p[1]);if(d<bd){bd=d;bt=t;}}});if(bt)goals=new Set([bt]); }
+      const hop = marchStep(n, u.t, goals);
       if(hop) dest = hop;
     } else if(u.ord==='patrol'){
       const prey = nearestEnemyUnit(u,foes,105);
@@ -2042,10 +2091,9 @@ function moveForces(n){
       const opts = (LAND[u.t]||[]).filter(x=> W.owner[x] === n.code);
       if(opts.length) dest = opts[(Math.random()*opts.length)|0];
     }
-    u.t = dest;
     const i = (stack[dest] = (stack[dest]||0)) ; stack[dest]++;
     const p = terrPt(dest, i);
-    place(u, p[0], p[1]);
+    setCourse(u,p[0],p[1],dest!==u.t?dest:null);
     updateUnitTitle(u,n);
   });
   /* Air defenders stay over their base. Invaders rebase forward; patrols
@@ -2063,8 +2111,9 @@ function moveForces(n){
       else if(n.terr.size>1 && Math.random()<0.34){ const pool=[...n.terr]; u.t=pool[(Math.random()*pool.length)|0]; }
     }
     const i = 40 + (u.id % 5);
-    const p = terrPt(u.t, i);
-    place(u, p[0], p[1]);
+    let p = terrPt(u.t, i);
+    if(u.ord==='invade'&&objective) p=[objective.p[0]+(u.id%5-2)*3,objective.p[1]+((u.id*3)%5-2)*3];
+    setCourse(u,p[0],p[1]);
     updateUnitTitle(u,n);
   });
   /* Fleet defenders guard home waters. Invaders steam for hostile coasts.
@@ -2079,7 +2128,10 @@ function moveForces(n){
       const prey=nearestEnemyUnit(u,foes,125);
       if(prey){ u.hunt=prey.id; goal=[prey.x,prey.y]; }
     }
-    if(!goal && u.ord==='invade' && foes.size){
+    if(!goal && u.ord==='invade' && objective){
+      if(objective.t&&(SEA[objective.t]||[]).length) goalT=objective.t;
+    }
+    if(!goal && !goalT && u.ord==='invade' && foes.size){
       foes.forEach(fc=>{
         const F = W.nations[fc]; if(!F || !F.alive) return;
         F.terr.forEach(t=>{
@@ -2100,12 +2152,7 @@ function moveForces(n){
       goal = goalT ? offshorePt(goalT,fi) : [u.x,u.y];
     }
     if(goalT && W.owner[goalT]===n.code) u.t=goalT;
-    const dx = goal[0]-u.x, dy = goal[1]-u.y, d = Math.hypot(dx,dy);
-    const step = 17 + 26*Math.pow(Math.max(0,n.p.naval||0)/100, 1.2);
-    if(d > 2){
-      const k = Math.min(1, step/d);
-      place(u, u.x + dx*k, u.y + dy*k);
-    }
+    setCourse(u,goal[0],goal[1]);
     updateUnitTitle(u,n);
   });
   /* silos sit still; they exist to be counted and, at the end, used */
@@ -2113,7 +2160,7 @@ function moveForces(n){
     if(u.k !== 'silo') return;
     if(!n.terr.has(u.t)){
       const ts = [...n.terr];
-      if(ts.length){ u.t = ts[(Math.random()*ts.length)|0]; const p = terrPt(u.t, 30+(u.id%4)); place(u, p[0], p[1]); }
+      if(ts.length){ u.t = ts[(Math.random()*ts.length)|0]; const p = terrPt(u.t, 30+(u.id%4)); setCourse(u,p[0],p[1]); }
     }
     updateUnitTitle(u,n);
   });
@@ -2403,10 +2450,11 @@ function watched(A,B){ return A.code===W.follow || B.code===W.follow; }
 function tone(A,B,loud){ return watched(A,B) ? 'me' : (loud ? 'big' : 'dim'); }
 function heard(A,B,loud){ return watched(A,B) || loud || notable(A) || notable(B); }
 
-function openWar(A, B, th){
+function openWar(A, B, th, focus){
   const k = warKey(A.code, B.code);
   if(W.wars[k]) return;
-  W.wars[k] = {x:A.code, y:B.code, p:0, since:W.turn, th:th, broke:0, quiet:0, moves:0};
+  W.wars[k] = {x:A.code, y:B.code, p:0, since:W.turn, th:th, focus:focus||null, broke:0, quiet:0, moves:0};
+  A.goal=B.code; B.goal=A.code;
   W.nwar++;
   const loud = notable(A) && notable(B);
   if(heard(A,B,loud))
@@ -2584,7 +2632,7 @@ function engage(k){
     const fwd = w.p > 0;
     const X = fwd ? A : B, Y = fwd ? B : A;
     const edges = (fwd ? ca : cb).e;
-    const target = pickTarget(edges);
+      const target = w.focus&&edges.some(e=>e.to===w.focus) ? w.focus : pickTarget(edges);
     const held = target ? defendersIn(Y, target) : 0;
     if(held > 0.05){
       /* the line is broken but the garrison is not. The assault stalls on top
@@ -2678,7 +2726,12 @@ function declare(n){
     if(o.fronts > 0) s *= 1.18;                /* kick them while they are busy */
     if((o.p.nuclear||0) > 25) s *= 0.74;
     if(th==='sea') s *= 0.62;
-    s *= 0.72 + Math.random()*0.56;
+    if(n.style==='Opportunist') s*=Math.pow((fieldPower(n)+5)/(fieldPower(o)+5),.35);
+    if(n.style==='Aggressive') s*=1.18;
+    if(n.style==='Cautious') s*=.88;
+    if(n.style==='Naval raider'&&th==='sea') s*=1.35*n.navalBias;
+    if(n.style==='Capital hunter'&&o.terr.size<=2) s*=1.22;
+    s *= n.risk*(0.62 + Math.random()*.76*n.chaos);
     if(s > bs){ bs = s; best = {o, th}; }
   });
   if(!best) return false;
@@ -2687,6 +2740,13 @@ function declare(n){
   if(bs < bar) return false;
   openWar(n, best.o, best.th);
   return true;
+}
+
+function openingWars(){
+  const C=W.nations.CHL, B=W.nations.BOL;
+  if(C&&B&&C.alive&&B.alive) openWar(C,B,'land','BOL');
+  const A=W.nations.ARG, G=W.nations.GBR;
+  if(A&&G&&A.alive&&G.alive&&W.owner.FLK==='GBR') openWar(A,G,'sea','FLK');
 }
 
 function forceConfrontation(alive){
@@ -2856,7 +2916,7 @@ function renderFocus(){
   n.units.forEach(u=>{ if(orders[u.ord]!=null) orders[u.ord]++; });
   document.getElementById('fStat').innerHTML =
     '<span style="grid-column:1/-1;color:var(--ink-3);padding-bottom:3px"><b style="color:var(--ink)">'+esc(n.docLabel)+
-      '</b> \u00b7 index '+powerOf(n).toFixed(0)+', at the front '+fieldPower(n).toFixed(0)+'</span>'+
+      '</b> · '+esc(n.style)+' AI · index '+powerOf(n).toFixed(0)+', at the front '+fieldPower(n).toFixed(0)+'</span>'+
     '<span style="grid-column:1/-1;color:var(--ink-3);padding-bottom:5px">'+
       (atWar.length ? 'At war with '+esc(atWar.join(' · ')) : 'At peace')+'</span>'+
     '<span style="grid-column:1/-1;color:var(--ink-3);padding-bottom:5px">Orders · '+
@@ -2911,7 +2971,9 @@ function startWorld(code){
   say('yr', String(W.year0));
   say('big','   '+Object.values(W.nations).length+' sovereign states take the field. You follow '+me.flag+' '+me.name+
              ' — '+me.docLabel.toLowerCase()+'.');
+  openingWars();
   say('dim','   A turn is one month. Borders start wars; if the map fragments, expedition routes force the survivors back into contact.');
+  say('dim','   Units move continuously toward strategic objectives; the monthly clock resolves supply, losses and control.');
   say('dim','   There are no draws or permanent ceasefires. The clock stops only when one country remains.');
   say('dim','   Irradiated ground is black. Click any territory to switch the flag you follow.');
   document.getElementById('tYear').textContent = dateOf(1);
