@@ -2294,6 +2294,8 @@ function paintUnit(u){
   u.el.setAttribute('transform','translate('+u.x.toFixed(1)+' '+u.y.toFixed(1)+') scale('+ucScale(u)+')');
 }
 function place(u, x, y, snap){
+  const fix = keepToElement(u, x, y);
+  if(fix){ x = fix[0]; y = fix[1]; }
   const dx=x-u.x, dy=y-u.y;
   if(!snap && (u.k==='air'||u.k==='fleet') && Math.hypot(dx,dy)>.35){
     u.heading=Math.atan2(dy,dx)*180/Math.PI + (u.k==='air'?90:0);
@@ -2307,6 +2309,11 @@ function place(u, x, y, snap){
   if(snap) requestAnimationFrame(()=>{ if(u.el) u.el.style.transition = ''; });
 }
 function setCourse(u,x,y,pendingT){
+  /* Clamp the order, not just the step. A course laid into a mountain range
+     leaves the squadron grinding against the shoreline for the rest of the
+     war; clamped here it simply arrives at the nearest water and stops. */
+  const fix = keepToElement(u, x, y);
+  if(fix){ x = fix[0]; y = fix[1]; }
   if((u.k==='army'||u.k==='fleet')&&Math.hypot(x-u.x,y-u.y)>.5){
     u.stillSince=0;u.garrisoned=false;if(u.el)u.el.classList.remove('garrison');
   }
@@ -2556,6 +2563,89 @@ function compactQty(v){
   return nf.format(q);
 }
 
+/* ---------- land and water ----------
+   A ship's station used to be a guess: step away from the average direction of
+   the territory's land neighbours and trust that the sea is over there. On a
+   coast that bends the wrong way -- Panama, the Levant, the Gulf -- that walk
+   ends inland, and a submarine spends the war parked in somebody's mountains.
+   The same guesswork stood field armies on open water. The drawn map is the
+   only authority on where the water is, so bake it once: fill every outline
+   into an offscreen bitmap and read it back as a mask. A lookup is then two
+   integer divisions, and anything standing in the wrong element steps out to
+   the nearest cell of the one it belongs in. */
+const MASK_S = 2;                      /* mask cells per map unit, about eight miles */
+let MASK = null, MASK_W = 0, MASK_H = 0;
+function landMask(){
+  if(MASK) return MASK;
+  MASK_W = Math.ceil(GEO.w*MASK_S); MASK_H = Math.ceil(GEO.h*MASK_S);
+  MASK = new Uint8Array(MASK_W*MASK_H);
+  try{
+    const cv = document.createElement('canvas');
+    cv.width = MASK_W; cv.height = MASK_H;
+    const ctx = cv.getContext('2d', {willReadFrequently:true});
+    ctx.fillStyle = '#fff';
+    ctx.scale(MASK_S, MASK_S);
+    for(const code in GD){
+      const d = GD[code] && GD[code].d; if(!d) continue;
+      try{ ctx.fill(new Path2D(d)); }catch(e){}
+    }
+    const px = ctx.getImageData(0,0,MASK_W,MASK_H).data;
+    for(let i=0, j=3; i<MASK.length; i++, j+=4) if(px[j] > 40) MASK[i] = 1;
+  }catch(e){}
+  return MASK;
+}
+function isLand(x,y){
+  const m = landMask();
+  const cx = Math.floor(x*MASK_S), cy = Math.floor(y*MASK_S);
+  if(cx<0||cy<0||cx>=MASK_W||cy>=MASK_H) return false;      /* past the edge is ocean */
+  return m[cy*MASK_W+cx] === 1;
+}
+/* The nearest cell of the other element. A coastline is shared, so the answer
+   for one cell is the answer for everything that lands in it: remember it, and
+   a thousand formations a turn cost one ring search between them. */
+const FIX_SEA = new Map(), FIX_LAND = new Map();
+const FIX_R = 44;                      /* give up past twenty-odd map units */
+function nearestCell(x, y, want){
+  const m = landMask();
+  const cx = Math.floor(x*MASK_S), cy = Math.floor(y*MASK_S);
+  const memo = want ? FIX_LAND : FIX_SEA;
+  const key = cy*MASK_W + cx;
+  const hit = memo.get(key); if(hit !== undefined) return hit;
+  let out = null, bd = Infinity;
+  const look = (ax,ay)=>{
+    if(ax<0||ay<0||ax>=MASK_W||ay>=MASK_H) return;          /* never station off the map */
+    if(m[ay*MASK_W+ax] !== want) return;
+    const d = (ax-cx)*(ax-cx) + (ay-cy)*(ay-cy);
+    if(d < bd){ bd = d; out = [(ax+0.5)/MASK_S, (ay+0.5)/MASK_S]; }
+  };
+  for(let r=1; r<=FIX_R && !out; r++){
+    for(let ax=cx-r; ax<=cx+r; ax++){ look(ax, cy-r); look(ax, cy+r); }
+    for(let ay=cy-r+1; ay<=cy+r-1; ay++){ look(cx-r, ay); look(cx+r, ay); }
+  }
+  memo.set(key, out);
+  return out;
+}
+/* Step a point into the element it belongs in, keeping the bearing it arrived
+   on and fanning by formation, so a squadron pushed off a headland spreads
+   along the coast instead of stacking on one cell. */
+function intoElement(u, x, y, land){
+  if(isLand(x,y) === land) return null;
+  const c = nearestCell(x, y, land ? 1 : 0);
+  if(!c) return null;
+  const dx = c[0]-x, dy = c[1]-y, d = Math.hypot(dx,dy);
+  if(d < 1e-6) return [c[0], c[1]];
+  const ux = dx/d, uy = dy/d, fan = ((u.id%5)-2)*(land ? 0.55 : 0.80);
+  const px = c[0] + ux*0.9 - uy*fan, py = c[1] + uy*0.9 + ux*fan;
+  if(isLand(px,py) === land) return [px, py];
+  return [c[0], c[1]];
+}
+/* Hulls float, tracks do not. Aircraft are the one thing that crosses freely. */
+function keepToElement(u, x, y){
+  if(u.embarked) return null;
+  if(u.k === 'fleet') return intoElement(u, x, y, false);
+  if(u.k === 'army' || u.k === 'silo') return intoElement(u, x, y, true);
+  return null;
+}
 /* ---------- where things stand ---------- */
 function terrPt(t, i){
   const c = GD[t] && GD[t].c; if(!c) return [0,0];
@@ -2563,8 +2653,11 @@ function terrPt(t, i){
   const a = i*2.39996, r = 5 + 3.1*Math.sqrt(i);     /* phyllotaxis: stacks fan out, never overlap */
   return [c[0] + Math.cos(a)*r, c[1] + Math.sin(a)*r];
 }
-/* a point just off the coast, found by stepping away from the territory's
-   land neighbours — crude, but it puts fleets in water on every continent */
+/* A point just off the coast. The bearing away from the land neighbours still
+   says something — it points at open sea rather than at a strait — but it only
+   breaks ties now. What settles the station is the mask: sweep outward in
+   thirty-two directions, take the first one that reaches genuine water, and
+   prefer the short walk on the seaward side. */
 const OFFP = {};
 function offshore(t){
   if(OFFP[t]) return OFFP[t];
@@ -2576,9 +2669,23 @@ function offshore(t){
     const l = Math.hypot(c[0]-o[0], c[1]-o[1]) || 1;
     dx += (c[0]-o[0])/l; dy += (c[1]-o[1])/l; k++;
   });
-  if(!k || (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6)){ dx = 0; dy = 1; }
-  const l = Math.hypot(dx,dy) || 1;
-  return OFFP[t] = [c[0] + dx/l*26, c[1] + dy/l*26];
+  const bl = Math.hypot(dx,dy);
+  if(bl > 1e-6){ dx /= bl; dy /= bl; } else { dx = 0; dy = 1; k = 0; }
+  let best = null, bc = Infinity;
+  for(let a=0; a<32; a++){
+    const th = a/32*Math.PI*2, ux = Math.cos(th), uy = Math.sin(th);
+    const bias = k ? (ux*dx + uy*dy) : 0;              /* +1 is straight out to sea */
+    for(let r=1.5; r<=84; r+=1.5){
+      if(isLand(c[0]+ux*r, c[1]+uy*r)) continue;
+      const px = c[0]+ux*(r+2.5), py = c[1]+uy*(r+2.5);
+      if(isLand(px,py)) continue;                      /* a lake or a strait, not a station */
+      const cost = r*(1 - 0.22*bias);
+      if(cost < bc){ bc = cost; best = [px,py]; }
+      break;
+    }
+  }
+  if(best) return OFFP[t] = best;
+  return OFFP[t] = nearestCell(c[0], c[1], 0) || [c[0], c[1] + 26];
 }
 /* Fleet markers are groups of up to ten vessels. Fan them around their coast
    instead of stacking identical symbols at one coordinate. */
