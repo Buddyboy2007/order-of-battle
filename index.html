@@ -2987,6 +2987,25 @@ function assignSeaLift(n,objective){
       ship.carrying=a.id;if(a.el)a.el.style.display='none';used.add(ship.id);
     });
 }
+/* How long it takes to put an army across a given stretch of water.
+   The old code asked a yes/no question — is a loaded transport sitting within
+   three hundred miles of this beach right now — and three quarters of the time
+   the answer was no and always would be, because the attacker's hulls were a
+   third of the way around the world. An invasion is not a hull in the right
+   place. It is a shipping programme: so many months of gathering tonnage, as
+   many as the sea is wide, fewer the more sealift the country actually owns.
+   Every crossing therefore finishes eventually, which is the point. */
+function liftMonths(n, t){
+  const q = offshore(t);
+  let d = Infinity;
+  n.terr.forEach(a=>{ const o = offshore(a); const h = Math.hypot(o[0]-q[0], o[1]-q[1]); if(h < d) d = h; });
+  if(!Number.isFinite(d)) d = 420;
+  let hulls = 0;
+  n.units.forEach(u=>{ if(u.k==='fleet' && u.str > 0.08) hulls += u.str; });
+  const lift = 0.55 + hulls;            /* no navy still leaves a merchant marine */
+  const miles = d * MAP_MILES;
+  return Math.max(2, Math.min(28, 2 + Math.round(miles/420/lift)));
+}
 function amphibiousLift(n,t){
   const q=offshore(t);
   for(const a of n.units){
@@ -3895,7 +3914,7 @@ function resistTick(){
       const u = e.first; u.str = Math.max(0, u.str - 0.012*r); if(u.str<=0.02) killUnit(u);
     }
     /* and if nobody is sitting on it, the flag can come back up */
-    if(!held && r > 0.42 && Math.random() < 0.0045*r) revolt(t);
+    if(!held && r > 0.42 && Math.random() < 0.0014*r) revolt(t);
   }
 }
 function revolt(t){
@@ -4035,7 +4054,9 @@ function heard(A,B,loud){ return watched(A,B) || loud || notable(A) || notable(B
 function openWar(A, B, th, focus){
   const k = warKey(A.code, B.code);
   if(W.wars[k]) return;
-  W.wars[k] = {x:A.code, y:B.code, p:0, since:W.turn, th:th, focus:focus||null, broke:0, quiet:0, moves:0};
+  W.wars[k] = {x:A.code, y:B.code, p:0, since:W.turn, th:th, focus:focus||null, broke:0, quiet:0, moves:0,
+                lastMove:W.turn, siege:0, siegeT:null, wait:0, waitT:null,
+                run:0, runDir:0, net:0};
   A.goal=B.code; B.goal=A.code;
   W.nwar++;
   const loud = notable(A) && notable(B);
@@ -4111,6 +4132,22 @@ function engage(k){
     return;
   }
   w.quiet = 0; w.th = th;
+
+  /* Name the objective. w.focus was set once, at declaration, and then never
+     written again, so strategicObjective() fell back to whichever province of
+     the enemy happened to be first in the set — and every army and hull
+     ordered to invade steered at that instead of at the province the line was
+     actually trying to take. That is why a stalled front had no field army
+     standing on it: not because the troops were dead, but because nobody had
+     told them where the war was. Re-aim it whenever the line has sat still. */
+  if(!w.focus || W.owner[w.focus] == null ||
+     (W.turn - (w.lastMove || w.since || 0)) > 12){
+    const fw = w.p >= 0, es = (fw ? ca : cb).e;
+    if(es.length){
+      const tg = pickTarget(es, fw ? A : B, fw ? B : A);
+      if(tg) w.focus = tg;
+    }
+  }
 
   /* Mass at the front is not an abstraction. It is the formations physically
      standing there: armies in the border provinces, air wings inside combat
@@ -4213,12 +4250,45 @@ function engage(k){
   let swing = 0.165*(odds-0.5)*2;
   swing = Math.max(-0.090, Math.min(0.090, swing));
   if(Math.abs(swing) < 0.005) swing = (swing>=0?1:-1)*0.005;
-  swing *= 1 + 0.30*Math.min(4, w.broke);       /* a broken line breaks faster */
-  /* no infantry on the ground, no ground gained, however good the air force */
+  /* A broken line breaks faster — but only for whoever broke it. w.broke
+     counted every change of hands by either side and then multiplied the
+     swing in both directions, so a province that had traded hands six times
+     produced a war that traded it faster, which is the opposite of momentum.
+     Count the run instead: consecutive gains by the same side, reset the
+     moment the other side takes something back. */
+  const mom = 1 + 0.30*Math.min(4, w.run || 0);
+  if((w.runDir > 0 && swing > 0) || (w.runDir < 0 && swing < 0)) swing *= mom;
+  /* no infantry on the ground, no ground gained, however good the air force.
+     This stays ahead of everything below: no amount of accumulated pressure
+     advances a front that has no field army standing on the contact. */
   if(th==='land'){
     if(swing > 0 && CA.gm < 0.08) swing = Math.min(swing, 0.002);
     if(swing < 0 && CB.gm < 0.08) swing = Math.max(swing, -0.002);
   }
+  /* A front that has not moved in four years is not a balanced front. It is
+     two armies that have stopped being able to hurt each other at the same
+     rate, and the month's luck deciding nothing either way. Let the pressure
+     build instead: the longer the line sits, the harder each month pushes it,
+     in whichever direction the exchange is actually going. */
+  const stale = W.turn - (w.lastMove || w.since || 0);
+  swing *= 1 + Math.min(2.4, stale/20);
+  /* Multiplying the month's luck is not enough on its own, because the luck
+     has no sign: scaling up a coin flip only gives a wider coin flip. Forty
+     years into one of these wars w.p was still sitting a fifth of the way to
+     a breakthrough, which is exactly what the world looked like — ninety
+     states, a hundred wars, and nobody falling. So add a drift the noise
+     cannot cancel. It is small, it points at whoever genuinely has the
+     stronger field army, and it only appears once a line has already refused
+     to move for a couple of years, so a war that is going somewhere is still
+     decided by the fighting rather than by this. */
+  const dir = fieldPower(A) >= fieldPower(B) ? 1 : -1;
+  /* and the drift escalates with the line's age exactly as the swing above
+     does. Scaling only the noise was the original mistake in another costume:
+     a wider coin flip still averages nowhere, so a decided war never closed
+     out. This is the term that actually ends one. */
+  const creep = dir * 0.020 * Math.min(1, Math.max(0, stale - 20)/40)
+                     * (1 + Math.min(2.4, stale/20));
+  if(th !== 'land' || (creep > 0 ? CA.gm >= 0.08 : CB.gm >= 0.08)) swing += creep;
   w.p += swing;
 
   /* both sides burn materiel; the one losing the exchange burns more */
@@ -4246,35 +4316,94 @@ function engage(k){
   const front = (ca.e.length?ca.e:cb.e)[0];
   if(front && Math.random()<0.25) flash(front.to);
 
-  /* a state with one province left fights for it far harder than for its tenth */
-  const need = ((w.p>=0 ? B : A).terr.size <= 1) ? 1.85 : 1.0;
+  /* A state with one province left fights for it far harder than for its
+     tenth — and a front that has already given way three times does not then
+     hold as stoutly as one that has never moved. Net ground gained tilts the
+     threshold itself. Without that tilt the two sides are permanently
+     symmetric, and symmetric sides trade the same border province back and
+     forth forever: two hundred captures every hundred months and four states
+     destroyed. With it, a front that has clearly been decided accelerates to
+     a conclusion, which is the only way a conquest ever becomes an empire. */
+  const fwd0 = w.p >= 0;
+  const tilt = 0.15 * Math.max(-3, Math.min(3, w.net || 0)) * (fwd0 ? 1 : -1);
+  /* A capital is the hardest province on the board and should be. At 1.85 it
+     was not hard, it was impossible: w.net only moves when ground changes
+     hands, and in a war against a state that has only ever held one province
+     no ground ever has, so the tilt below is permanently zero and the bar
+     permanently 1.85 — against a month's push that cannot exceed a third of
+     that. Twenty-six states sat untouched at full strength for fourteen
+     hundred months behind it. A last stand costs the attacker half again what
+     an ordinary province does; it does not cost infinity. */
+  const need = Math.max(0.45, (((fwd0 ? B : A).terr.size <= 1) ? 1.40 : 1.0) - tilt);
   if(Math.abs(w.p) >= need){
     const fwd = w.p > 0;
     const X = fwd ? A : B, Y = fwd ? B : A;
     const edges = (fwd ? ca : cb).e;
       const target = w.focus&&edges.some(e=>e.to===w.focus) ? w.focus : pickTarget(edges, X, Y);
     const held = target ? defendersIn(Y, target, th) : 0;
-    if(held > 0.05){
+    /* A garrison used to have to be annihilated outright before the ground
+       changed hands: five hundredths of a division left standing held the
+       province, and since replacements arrive every month there always was
+       that much. Meanwhile the assault took a flat tenth of a division off it
+       however many corps were attacking. So measure the siege against what is
+       actually besieging — and let one that has sat on the same province for
+       most of a year finish it, which is what sieges do. */
+    const siege = (w.siegeT === target) ? (w.siege||0)+1 : 1;
+    w.siegeT = target; w.siege = siege;
+    const assault = (fwd ? ca : cb) && (fwd ? CA.g : CB.g).reduce((s,u)=>s+u.str, 0);
+    if(held > 0.05 + 0.22*siege){
       /* the line is broken but the garrison is not. The assault stalls on top
          of it and spends the month killing what is in the way. */
       w.p = (fwd?1:-1)*(need - 0.03);
-      grind(Y, target, 0.09 + 0.15*Math.random(), th);
+      grind(Y, target, 0.10 + 0.34*assault*(1 + 0.22*siege), th);
       if(target) flash(target);
       if(watched(X,Y) && Math.random()<0.30)
         say('me','   '+X.flag+' '+X.name+' is held at '+((GD[target]&&GD[target].n)||target)+
             ' \u2014 the garrison has not broken.');
     } else {
-      if(th==='sea'&&target&&!amphibiousLift(X,target)){
-        w.p=(fwd?1:-1)*(need-.03);
-        if(watched(X,Y)&&W.turn%8===0)
-          say('me','   '+X.flag+' '+X.name+' awaits a naval transport off '+((GD[target]&&GD[target].n)||target)+'.');
-        return;
+      let improvised = false;
+      if(th==='sea' && target && !amphibiousLift(X,target)){
+        const months = liftMonths(X, target);
+        w.wait = (w.waitT === target) ? (w.wait||0)+1 : 1;
+        w.waitT = target;
+        if(w.wait < months){
+          w.p=(fwd?1:-1)*(need-.03);
+          if(watched(X,Y)&&W.turn%8===0)
+            say('me','   '+X.flag+' '+X.name+' is assembling shipping for '+((GD[target]&&GD[target].n)||target)+
+                '  \u00b7  month '+w.wait+' of '+months+'.');
+          return;
+        }
+        /* the programme is complete: the landing goes in on requisitioned
+           merchant tonnage, and pays for the improvisation in what gets ashore */
+        improvised = true;
+      }
+      if(improvised){
+        (fwd?CA.g:CB.g).forEach(u=>{
+          u.str = Math.max(0.04, u.str - 0.10 - Math.random()*0.12);
+          u.org = Math.max(0.10, (u.org||0.5) - 0.18);
+          hitFlash(u);
+        });
+        if(watched(X,Y))
+          say('me','   '+X.flag+' '+X.name+' lands on '+((GD[target]&&GD[target].n)||target)+
+              ' off requisitioned shipping \u2014 the crossing cost it.');
       }
       const t = capture(X, Y, edges, target, th);
-      /* ground changes hands and is immediately contested again: the defender
-         counterattacks onto what it just lost */
-      w.p = fwd ? -0.18 : 0.18;
-      w.broke++; w.moves++;
+      /* Ground changes hands and is immediately contested again — but the
+         attacker is the side standing on it. This used to hand the initiative
+         straight back across the line (p flipped to -0.18, so the defender had
+         0.82 to travel for a counterattack while the attacker needed 1.18 for
+         the next province) and the result was a permanent see-saw: sixteen
+         hundred provinces changed hands across a run and produced a hundred
+         and sixty states destroyed, because the same ground went back and
+         forth forever. Leave the line on the winning side of the start. A
+         counterattack is still perfectly possible; it is just no longer free,
+         which is what lets a conquest compound into an empire. */
+      const dirC = fwd ? 1 : -1;
+      if(w.runDir === dirC) w.run = (w.run||0)+1; else { w.runDir = dirC; w.run = 1; }
+      w.net = (w.net||0) + dirC;
+      w.p = dirC * 0.28;
+      w.broke++; w.moves++; w.lastMove = W.turn; w.siege = 0; w.siegeT = null;
+      w.wait = 0; w.waitT = null;
       if(t){
         const loud = Y.terr.size===0 || notable(X) || notable(Y);
         if(heard(X,Y,loud))
@@ -4304,7 +4433,25 @@ function collapse(loser, victor){
 }
 
 /* ---------- picking a fight ---------- */
-function maxFronts(n){ return 1 + Math.floor(n.terr.size/7); }
+/* How many wars a state can hold at once. One front per seven provinces meant
+   that very nearly every state on the board could hold exactly one, so a power
+   with five hostile borders worked through them strictly in series — and since
+   each war also consumed the defender's only slot, the map locked into sixty
+   bilateral grinds that no empire could ever grow out of. Capacity grows with
+   the country, and a ranked military carries more of it than its share of the
+   map suggests. The multi-front penalties in spread() and fieldPower() are what
+   keep it honest. */
+function maxFronts(n){
+  const r = n.rank || 999;
+  /* One front per three provinces was as wrong in the other direction as one
+     per seven had been. It handed the leading powers eleven simultaneous wars,
+     and the multi-front penalties in spread() and fieldPower() then made each
+     of those eleven armies too weak to break anything — thirty-eight hundred
+     provinces changing hands to produce two hundred conquests, because nobody
+     could ever concentrate. One per six keeps an empire able to fight on
+     several borders without being able to fight on all of them at once. */
+  return 1 + Math.floor(n.terr.size/6) + (r <= 15 ? 2 : r <= 50 ? 1 : 0);
+}
 
 function declare(n){
   if(n.fronts >= maxFronts(n)) return false;
@@ -4415,6 +4562,7 @@ function breakDeadlock(alive){
     const dir = fieldPower(A)>=fieldPower(B) ? 1 : -1;
     w.p += dir*0.48;
     w.broke = Math.min(6,(w.broke||0)+2);
+    w.runDir = dir; w.run = Math.min(4,(w.run||0)+2);
   });
   say('big','◆  TOTAL-WAR MOBILISATION — static fronts are reinforced until one line breaks · '+dateOf(W.turn));
 }
@@ -4493,20 +4641,22 @@ function runTurn(){
   document.getElementById('tWars').textContent = W.nwar;
   renderFocus(); renderBoard();
 
-  /* frozen-world detection: nobody knocked out and the map has barely moved */
-  const sig = alive.map(n=>n.code+':'+n.terr.size).join('|');
-  if(alive.length !== W.lastCount){ W.lastCount = alive.length; W.frozen = 0; }
-  else {
-    const prev = W.lastSig ? W.lastSig.split('|') : null;
-    const drift = prev ? sig.split('|').filter((s,i)=> s !== prev[i]).length : 99;
-    W.frozen = (drift <= Math.max(1, alive.length*0.2)) ? (W.frozen||0)+1 : 0;
-  }
-  W.lastSig = sig;
+  /* Frozen-world detection used to watch province counts drift. With seventy
+     wars grinding away something always drifts, so the valve never opened
+     while the thing it exists to prevent — a world where no state ever falls
+     again — went on for thousands of months. Watch the only number that says
+     the game is still going somewhere: when somebody last ceased to exist. */
+  /* Only a fall counts. A revolt puts a state back on the board and moves the
+     count the other way, and crediting that as progress was enough to keep the
+     valve shut permanently. */
+  if(W.lastFall == null) W.lastFall = W.turn;
+  if(alive.length < W.lastCount) W.lastFall = W.turn;
+  W.lastCount = alive.length;
 
   afkTrack();
 
   if(alive.length === 1) victory(alive[0]);
-  else if(W.frozen > 120 && W.turn > 180){ breakDeadlock(alive); W.frozen=0; }
+  else if(W.turn - W.lastFall > 54 && W.turn > 120 && W.nwar){ breakDeadlock(alive); W.lastFall = W.turn; }
   else if(!W.nwar){
     W.stall = (W.stall||0)+1;
     if(W.stall > 12){ forceConfrontation(alive); W.stall=0; }
